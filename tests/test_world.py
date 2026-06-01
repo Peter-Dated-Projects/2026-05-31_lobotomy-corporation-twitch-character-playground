@@ -1,0 +1,95 @@
+"""Command acceptance: !follow, !hug, !leave, !join through World.
+
+These reproduce the contract's Acceptance bullets headlessly. The ``calm``
+fixture keeps wandering characters grounded so grouping geometry is stable.
+"""
+
+from __future__ import annotations
+
+from pygame.math import Vector2
+
+from twitch_playground.chat.commands import ChatCommand
+from twitch_playground.sim.character import Mode
+from twitch_playground.sim.world import World
+
+
+def _ground_two(world: World):
+    """Spawn 'a' and 'b' and run one tick so both bind to the ground platform."""
+    a = world.spawn("a")
+    b = world.spawn("b")
+    world.update(1 / 60)
+    assert a.platform is not None and b.platform is not None
+    return a, b
+
+
+def test_follow_snaps_follower_beside_leader_anchor_stays_put(provider, calm):
+    world = World(provider)
+    leader, follower = _ground_two(world)
+    # Pin positions so the follower's walk-to-slot finishes in a bounded number
+    # of frames (random spawn x can otherwise sit ~900px from the slot).
+    leader.pos = Vector2(400, leader.pos.y)
+    follower.pos = Vector2(470, follower.pos.y)
+    leader_pos_before = Vector2(leader.pos)
+
+    world.handle_command(ChatCommand(cmd="follow", args=["@a"], author="b"))
+
+    # Same cluster, leader is the anchor.
+    assert follower.group_id is not None
+    assert leader.group_id == follower.group_id
+
+    # Follower's slot is on the leader's platform, beside (not on top of) it.
+    assert follower.group_slot is not None
+    assert follower.group_slot.y == leader.platform.top
+    assert leader.platform.left <= follower.group_slot.x <= leader.platform.right
+    assert follower.group_slot.x != leader.pos.x
+
+    # Anchor does not move when the cluster forms.
+    assert leader.pos == leader_pos_before
+
+    # And the follower actually walks onto the slot (grounded, not airborne).
+    for _ in range(240):
+        world.update(1 / 60)
+    assert follower.platform is not None
+    assert follower.pos.distance_to(follower.group_slot) <= 1.0
+    assert leader.pos == leader_pos_before  # anchor still parked
+
+
+def test_hug_reverts_both_and_does_not_freeze(provider, calm):
+    world = World(provider)
+    a, b = _ground_two(world)
+
+    world.handle_command(ChatCommand(cmd="hug", args=["@b"], author="a"))
+    assert a.mode is Mode.EMOTING and b.mode is Mode.EMOTING
+    assert a.clip == "hug" and b.clip == "hug"
+
+    # Past HUG_DURATION both must resume prior behaviour, not stay frozen.
+    for _ in range(120):  # 2s at dt=1/60
+        world.update(1 / 60)
+    assert a.mode is Mode.WANDER and b.mode is Mode.WANDER
+    assert a.clip != "hug" and b.clip != "hug"
+
+
+def test_leave_dissolves_a_one_member_cluster(provider, calm):
+    world = World(provider)
+    a, b = _ground_two(world)
+    world.handle_command(ChatCommand(cmd="follow", args=["@a"], author="b"))
+    assert b.group_id is not None
+
+    # b leaving drops the cluster to a single member, which must dissolve fully.
+    world.handle_command(ChatCommand(cmd="leave", args=[], author="b"))
+    assert b.group_id is None
+    assert a.group_id is None
+    assert world.groups == {}
+    assert a.mode is Mode.WANDER and b.mode is Mode.WANDER
+
+
+def test_rejoin_pulls_sender_out_of_a_cluster(provider, calm):
+    world = World(provider)
+    a, b = _ground_two(world)
+    world.handle_command(ChatCommand(cmd="follow", args=["@a"], author="b"))
+    assert b.group_id is not None
+
+    # !join while already grouped removes you from the cluster.
+    world.handle_command(ChatCommand(cmd="join", args=[], author="b"))
+    assert b.group_id is None
+    assert b.mode is Mode.WANDER
