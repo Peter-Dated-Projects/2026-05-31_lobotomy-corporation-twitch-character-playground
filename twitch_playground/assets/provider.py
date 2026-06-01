@@ -20,7 +20,7 @@ from twitch_playground import settings
 class SpriteSet:
     """Animation frames for one character type, keyed by clip name.
 
-    Required clips: "idle", "walk", "hug".
+    Required clips: "idle", "walk", "jump", "hug".
     """
 
     frames: dict[str, list[pygame.Surface]]
@@ -76,6 +76,12 @@ class PlaceholderProvider:
             _body(bw, bh, color),
             _body(bw - 2, bh + 2, color),
         ]
+        # jump: a stretched airborne pose -- narrower and taller, held as a
+        # near-static clip while the character is off the ground.
+        jump = [
+            _body(bw - 3, bh + 6, color),
+            _body(bw - 4, bh + 8, color),
+        ]
         # hug: widen arms outward then back (placeholder for a real hug clip)
         hug = [
             _body(bw, bh, color),
@@ -83,4 +89,4 @@ class PlaceholderProvider:
             _body(bw + 8, bh - 2, color),
             _body(bw + 5, bh - 1, color),
         ]
-        return SpriteSet({"idle": idle, "walk": walk, "hug": hug})
+        return SpriteSet({"idle": idle, "walk": walk, "jump": jump, "hug": hug})

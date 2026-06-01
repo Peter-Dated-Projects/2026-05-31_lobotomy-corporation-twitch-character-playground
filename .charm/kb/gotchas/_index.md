@@ -7,3 +7,5 @@ _No notes yet. Add atomic notes in this directory and list each one in the table
 
 | Note | Summary | Status |
 |---|---|---|
+| [group-slot-y-must-match-a-platform-top](group-slot-y-must-match-a-platform-top.md) | Follow slots split across tracks: World sets slot.y to a platform.top, Character resolves the platform from that y; a slot.y off any platform top leaves the follower unable to snap/ground. | current |
+| [character-surface-binding](character-surface-binding.md) | A Character treats platform is None as airborne (plays the jump clip and falls); to place one ON a surface its feet pos.y must equal a platform top within 1px so the first update can bind it. | current |

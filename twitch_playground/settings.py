@@ -15,11 +15,30 @@ SPRITE_H = 40
 # Movement (px/sec, since we integrate with delta-time)
 MAX_SPEED = 70.0
 WALK_THRESHOLD = 8.0  # speed below which a wandering character is "idle"
-WANDER_JITTER_DEG = 220.0  # per second
-SEPARATION_RADIUS = 48.0
-SEPARATION_WEIGHT = 90.0
 GROUP_SLOT_SPACING = SPRITE_W + 10
 GROUP_ARRIVE_RADIUS = 4.0  # distance to a group slot below which we stop
+
+# Sidescroller physics (px, px/s, px/s^2). Smaller y is higher on screen, so a
+# jump is a negative y velocity and gravity is positive.
+GROUND_TOP = SCREEN_H - 60  # feet-y of the ground surface
+GRAVITY = 1200.0
+JUMP_SPEED = 580.0  # initial hop speed; apex ~JUMP_SPEED^2/(2*GRAVITY) ~= 140px,
+#                     comfortably above the 95px gap between platform tiers, so
+#                     every tier is reachable in a single jump from the one below.
+WALK_SPEED = 60.0  # horizontal stroll speed on a surface
+
+# Wander decisions. Chances are per-second and multiplied by dt for a per-frame
+# probability, so behaviour is independent of frame rate.
+JUMP_CHANCE = 0.45  # hops per second while grounded and strolling
+IDLE_CHANCE = 0.30  # idle-pause starts per second while grounded
+IDLE_PAUSE_MIN = 0.6
+IDLE_PAUSE_MAX = 1.8
+
+# Horizontal separation so characters sharing a surface do not fully overlap.
+# Purely horizontal: only neighbours at a similar height (same surface) push.
+HSEP_RADIUS = 30.0  # px; only neighbours closer than this nudge us apart
+HSEP_Y_BAND = 12.0  # px; only neighbours within this height band count
+HSEP_PUSH = 40.0  # px/s; max horizontal nudge applied
 
 # Animation
 ANIM_FPS = 8.0  # clip playback rate (independent of render FPS)
