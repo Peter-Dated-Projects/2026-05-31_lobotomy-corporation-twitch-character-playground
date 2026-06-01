@@ -16,6 +16,7 @@ from twitch_playground import settings
 from twitch_playground.assets.provider import AssetProvider
 from twitch_playground.chat.commands import ChatCommand, normalize_target
 from twitch_playground.sim.character import Character
+from twitch_playground.sim.platforms import default_level
 
 _CHARACTER_TYPE = "default"  # one placeholder type for v0
 
@@ -26,6 +27,7 @@ class World:
         self.characters: dict[str, Character] = {}
         self.groups: dict[int, list[str]] = {}  # gid -> ordered members, [0] is anchor
         self._next_gid = 1
+        self.platforms = default_level()  # index 0 is the full-width ground
 
         pygame.font.init()
         self._font = pygame.font.SysFont(None, settings.NAMEPLATE_FONT_SIZE)
@@ -81,10 +83,8 @@ class World:
         if len(self.characters) >= settings.MAX_CHARACTERS:
             self._evict_oldest(exclude=username)
         m = settings.WALL_MARGIN
-        pos = (
-            random.uniform(m, settings.SCREEN_W - m),
-            random.uniform(m, settings.SCREEN_H - m),
-        )
+        # spawn on the ground platform: feet at GROUND_TOP, random horizontal x
+        pos = (random.uniform(m, settings.SCREEN_W - m), settings.GROUND_TOP)
         char = Character(
             username=username,
             pos=pos,
@@ -143,19 +143,33 @@ class World:
             self._arrange_group(gid)
 
     def _arrange_group(self, gid: int) -> None:
-        """Anchor (members[0]) stays put; followers fan out symmetrically beside it."""
+        """Anchor (members[0]) stays put; followers stand beside it on the
+        leader's platform.
+
+        Slots share the leader platform's surface y (`platform.top`) and fan out
+        symmetrically in x, clamped to that platform's horizontal span so nobody
+        is parked off the edge. If the leader is airborne (platform is None) we
+        fall back to its current feet-y and the screen margins.
+        """
         members = self.groups[gid]
-        anchor_pos = Vector2(self.characters[members[0]].pos)
+        leader = self.characters[members[0]]
+        anchor_pos = Vector2(leader.pos)
         spacing = settings.GROUP_SLOT_SPACING
-        m = settings.WALL_MARGIN
+        if leader.platform is not None:
+            lo, hi = leader.platform.left, leader.platform.right
+            slot_y = leader.platform.top
+        else:
+            m = settings.WALL_MARGIN
+            lo, hi = m, settings.SCREEN_W - m
+            slot_y = anchor_pos.y
         for i, username in enumerate(members):
             if i == 0:
-                slot = Vector2(anchor_pos)
+                slot = Vector2(anchor_pos)  # anchor stays exactly where it is
             else:
                 side = 1 if i % 2 == 1 else -1
                 rank = (i + 1) // 2
-                slot = anchor_pos + Vector2(side * rank * spacing, 0)
-                slot.x = max(m, min(settings.SCREEN_W - m, slot.x))
+                x = max(lo, min(hi, anchor_pos.x + side * rank * spacing))
+                slot = Vector2(x, slot_y)
             self.characters[username].set_grouped(gid, slot)
 
     # --- per-frame ------------------------------------------------------------
@@ -163,7 +177,7 @@ class World:
     def update(self, dt: float) -> None:
         positions = [c.pos for c in self.characters.values()]
         for char in self.characters.values():
-            char.update(dt, positions)
+            char.update(dt, positions, self.platforms)
 
     # --- helpers --------------------------------------------------------------
 
