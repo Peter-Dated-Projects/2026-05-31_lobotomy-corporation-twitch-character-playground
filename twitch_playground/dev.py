@@ -9,6 +9,7 @@ Keys:
   H  a random viewer hugs another
   F  a random viewer follows another
   L  a random viewer leaves their group
+  `  (backquote) toggle the debug HUD overlay
 """
 
 from __future__ import annotations
@@ -21,7 +22,7 @@ import pygame
 
 from twitch_playground.chat.commands import ChatCommand
 
-HELP = "[dev] J=join  H=hug  F=follow  L=leave"
+HELP = "[dev] J=join  H=hug  F=follow  L=leave  `=toggle HUD"
 
 
 class DevInjector:

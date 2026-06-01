@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import queue
 import time
+from collections import deque
 
 import pygame
 from dotenv import load_dotenv
@@ -18,7 +19,7 @@ from twitch_playground.assets.provider import PlaceholderProvider
 from twitch_playground.chat.bot import start_chat_thread
 from twitch_playground.chat.commands import ChatCommand
 from twitch_playground.dev import HELP, DevInjector
-from twitch_playground.render import scene
+from twitch_playground.render import hud, scene
 from twitch_playground.sim.world import World
 
 
@@ -41,6 +42,11 @@ def main() -> None:
 
     injector = DevInjector(command_queue, lambda: list(world.characters))
 
+    # rolling log of the most recently handled commands, shown by the HUD so
+    # chat effects are visible while developing
+    recent_commands: "deque[ChatCommand]" = deque(maxlen=hud.LOG_MAXLEN)
+    hud_visible = True
+
     running = True
     while running:
         dt = clock.tick(settings.FPS) / 1000.0
@@ -51,18 +57,24 @@ def main() -> None:
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
                     running = False
+                elif event.key == pygame.K_BACKQUOTE:
+                    hud_visible = not hud_visible
                 else:
                     injector.handle_key(event.key)
 
         while not command_queue.empty():
             try:
-                world.handle_command(command_queue.get_nowait())
+                cmd = command_queue.get_nowait()
             except queue.Empty:
                 break
+            recent_commands.append(cmd)
+            world.handle_command(cmd)
 
         world.update(dt)
         world.tick_despawn(time.monotonic())
         scene.draw(screen, world)
+        if hud_visible:
+            hud.draw(screen, world, recent_commands)
         pygame.display.flip()
 
     pygame.quit()
