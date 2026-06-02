@@ -1,5 +1,7 @@
 """Flat module-level configuration. Override in tests by reassigning."""
 
+import os
+
 # Window / render
 SCREEN_W = 960
 SCREEN_H = 540
@@ -53,3 +55,35 @@ MAX_CHARACTERS = 100  # soft cap; oldest-idle evicted past this
 NAMEPLATE_FONT_SIZE = 14
 NAMEPLATE_COLOR = (235, 235, 235)
 NAMEPLATE_OUTLINE = (0, 0, 0)
+
+# --- LobCorp sprite assets ---------------------------------------------------
+# Root of the extracted sprite-sheet drop. Override with LOBCORP_ASSETS_ROOT to
+# point at a different checkout; nothing here touches the filesystem at import
+# time -- only the extraction layer reads these on demand.
+ASSETS_ROOT = os.environ.get(
+    "LOBCORP_ASSETS_ROOT",
+    os.path.expanduser("~/Downloads/drive-download-20260601T210823Z-3-001"),
+)
+PARTS_DIR = os.path.join(ASSETS_ROOT, "Employee Parts")
+CLOTHES_DIR = os.path.join(ASSETS_ROOT, "Employee Clothes and Weapons")
+
+# Sprites within this vertical range are treated as one row when sorting
+# extracted blobs into reading order.
+SHEET_ROW_TOLERANCE = 60
+
+# Per-layer anchor offset (dx, dy) relative to the canvas center, applied when
+# compositing a character. y grows downward, so negative dy lifts a layer up.
+# Tunable -- never hardcode these inline in the renderer.
+LAYER_OFFSETS = {
+    "rear_hair": (0, 0),
+    "body_limbs": (0, 10),
+    "clothes_limbs": (0, 10),
+    "body_torso": (0, 0),
+    "clothes_torso": (0, 0),
+    "head": (0, -30),
+    "front_hair": (0, -50),
+    "eyebrows": (0, -42),
+    "eyes": (0, -28),
+    "mouth": (0, -10),
+    "weapon": (20, 5),
+}
