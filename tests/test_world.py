@@ -8,9 +8,10 @@ from __future__ import annotations
 
 from pygame.math import Vector2
 
+from twitch_playground import settings
 from twitch_playground.assets.provider import SpriteSet
 from twitch_playground.chat.commands import ChatCommand
-from twitch_playground.sim.character import Mode
+from twitch_playground.sim.character import Character, Mode
 from twitch_playground.sim.world import World
 
 
@@ -39,6 +40,42 @@ def test_spawn_requests_each_viewers_own_character_id(provider):
         world.spawn(u)
 
     assert recorder.requested == usernames
+
+
+def test_update_builds_one_shared_neighbor_snapshot(provider, monkeypatch):
+    """World.update builds the neighbour records ONCE per frame -- one list,
+    handed to every character, carrying a frame-start (pos, facing, vx) snapshot
+    decoupled from the live characters (the L3+ shared-plumbing contract)."""
+    world = World(provider)
+    a = world.spawn("a")
+    b = world.spawn("b")
+    a.pos = Vector2(100, settings.GROUND_TOP)
+    b.pos = Vector2(140, settings.GROUND_TOP)
+    a.velocity = Vector2(25, 0)
+    b.velocity = Vector2(-15, 0)
+    a._facing = 1
+    b._facing = -1
+
+    captured: dict[str, list] = {}
+
+    def spy(self, dt, neighbors, platforms):  # noqa: ANN001 - test stub
+        captured[self.username] = neighbors  # capture without mutating positions
+
+    monkeypatch.setattr(Character, "update", spy)
+    world.update(1 / 60)
+
+    # Same list object handed to every character -- a single shared scan.
+    assert captured["a"] is captured["b"]
+    recs = captured["a"]
+    assert len(recs) == 2
+
+    by_x = {round(r.pos.x): r for r in recs}
+    assert by_x[100].facing == 1 and by_x[100].vx == 25
+    assert by_x[140].facing == -1 and by_x[140].vx == -15
+
+    # The record snapshots pos, so a later character move does not rewrite it.
+    a.pos.x = 999
+    assert by_x[100].pos.x == 100
 
 
 def _ground_two(world: World):

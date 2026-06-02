@@ -115,7 +115,7 @@ class Character:
     def update(
         self,
         dt: float,
-        neighbor_positions: list[Vector2],
+        neighbors: list[steering.Neighbor],
         platforms: list[Platform],
     ) -> None:
         # On the very first frame we know nothing about the level geometry, so
@@ -130,7 +130,7 @@ class Character:
         if self.mode is Mode.GROUPED:
             self._move_toward_slot(dt, platforms)
         else:
-            self._wander(dt, neighbor_positions, platforms)
+            self._wander(dt, neighbors, platforms)
 
         self._update_clip()
         self._advance_anim(dt)
@@ -138,11 +138,16 @@ class Character:
     def _wander(
         self,
         dt: float,
-        neighbor_positions: list[Vector2],
+        neighbors: list[steering.Neighbor],
         platforms: list[Platform],
     ) -> None:
         grounded = self.platform is not None
         pausing = False
+
+        # Local crowd density (same-band neighbour count) drives the decision
+        # block below and the speed slowdown: a packed platform shuffles, hops
+        # less, and pauses more -- the crowd "hangs out" instead of marching.
+        density = steering.local_density(self.pos, neighbors)
 
         if grounded:
             if self._pause_timer > 0:
@@ -154,25 +159,46 @@ class Character:
                     self._wander_heading = (
                         random.uniform(-1.0, 1.0) * settings.WALK_SPEED
                     )
-            elif random.random() < settings.JUMP_CHANCE * dt:
+            elif (
+                density < settings.CROWD_JUMP_DENSITY
+                and random.random() < settings.JUMP_CHANCE * dt
+            ):
                 self.velocity.y = -settings.JUMP_SPEED  # hop -> becomes airborne
                 self.platform = None
                 grounded = False
-            elif random.random() < settings.IDLE_CHANCE * dt:
-                self._pause_timer = random.uniform(
-                    settings.IDLE_PAUSE_MIN, settings.IDLE_PAUSE_MAX
+            else:
+                # Crowded characters pause more often (milling/hanging-out read).
+                idle_chance = settings.IDLE_CHANCE * (
+                    1.0 + density * settings.CROWD_IDLE_DENSITY_GAIN
                 )
-                pausing = True
+                if random.random() < idle_chance * dt:
+                    self._pause_timer = random.uniform(
+                        settings.IDLE_PAUSE_MIN, settings.IDLE_PAUSE_MAX
+                    )
+                    pausing = True
 
         # Drift the wander heading coherently while actively strolling.
         if grounded and not pausing:
             self._wander_heading = steering.wander_heading(self._wander_heading, dt)
 
-        # Desired horizontal velocity = wander heading (0 while paused) plus a
-        # separation nudge; ease the actual velocity toward it with a capped
-        # steering force instead of snapping, then clamp to MAX_SPEED.
-        desired_vx = 0.0 if pausing else self._wander_heading
-        desired_vx += steering.separation_push(self.pos, neighbor_positions)
+        # Desired horizontal velocity = wander heading (0 while paused), scaled
+        # down by crowd density (SFM density response, floored so nobody
+        # freezes), plus a separation-dominant crowd blend clamped to a max
+        # nudge. Ease the actual velocity toward it instead of snapping, then
+        # clamp to MAX_SPEED.
+        speed_scale = max(
+            settings.CROWD_MIN_SPEED_SCALE,
+            1.0 - density * settings.CROWD_SLOWDOWN_PER_NEIGHBOR,
+        )
+        desired_vx = 0.0 if pausing else self._wander_heading * speed_scale
+        crowd = (
+            settings.CROWD_SEP_WEIGHT * steering.separation_push(self.pos, neighbors)
+            + settings.CROWD_COH_WEIGHT * steering.cohesion_pull(self.pos, neighbors)
+            + settings.CROWD_ALI_WEIGHT * steering.alignment_nudge(self.pos, neighbors)
+        )
+        desired_vx += max(
+            -settings.CROWD_MAX_NUDGE, min(settings.CROWD_MAX_NUDGE, crowd)
+        )
         self.velocity.x = steering.steer_toward(
             self.velocity.x, desired_vx, settings.MAX_FORCE * dt
         )

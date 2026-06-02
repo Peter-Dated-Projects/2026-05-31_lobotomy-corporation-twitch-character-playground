@@ -15,6 +15,7 @@ from pygame.math import Vector2
 from twitch_playground import settings
 from twitch_playground.assets.provider import AssetProvider
 from twitch_playground.chat.commands import ChatCommand, normalize_target
+from twitch_playground.sim import steering
 from twitch_playground.sim.character import Character
 from twitch_playground.sim.platforms import default_level
 
@@ -173,9 +174,16 @@ class World:
     # --- per-frame ------------------------------------------------------------
 
     def update(self, dt: float) -> None:
-        positions = [c.pos for c in self.characters.values()]
+        # Build the shared neighbour records ONCE per frame -- a frame-start
+        # snapshot (pos copied, plus heading) handed to every character so all
+        # steering rules read one consistent list rather than re-scanning. Later
+        # behaviour layers widen this record (emotion); the build stays single.
+        neighbors = [
+            steering.Neighbor(Vector2(c.pos), c.facing, c.velocity.x)
+            for c in self.characters.values()
+        ]
         for char in self.characters.values():
-            char.update(dt, positions, self.platforms)
+            char.update(dt, neighbors, self.platforms)
 
     # --- helpers --------------------------------------------------------------
 

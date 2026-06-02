@@ -58,6 +58,26 @@ HSEP_RADIUS = 30.0  # px; only neighbours closer than this nudge us apart
 HSEP_Y_BAND = 12.0  # px; only neighbours within this height band count
 HSEP_PUSH = 40.0  # px/s; max horizontal nudge applied
 
+# Crowd awareness (Reynolds boids beyond separation). All three rules are
+# horizontal and same-surface (reuse HSEP_Y_BAND), all fed from the ONE shared
+# per-frame neighbour-record list. Mirrors the HSEP_* block above; liveliness
+# lives in these weights, so expect to tune by eye. The final crowd force is a
+# separation-dominant weighted blend clamped to CROWD_MAX_NUDGE:
+#   crowd = SEP_WEIGHT*separation + COH_WEIGHT*cohesion + ALI_WEIGHT*alignment
+CROWD_SEP_WEIGHT = 1.0  # separation is the collision-avoider, kept dominant
+CROWD_COH_WEIGHT = 0.15  # gentle pull toward the local pack
+CROWD_ALI_WEIGHT = 0.10  # gentle match to the local heading
+CROWD_COH_RADIUS = 80.0  # px; cohesion looks further than separation
+CROWD_ALI_RADIUS = 80.0  # px; alignment looks further than separation
+CROWD_DENSITY_RADIUS = 60.0  # px; same-band neighbour count window
+CROWD_MAX_NUDGE = 50.0  # px/s; clamp on the summed crowd force
+
+# Local-density response (SFM): a packed platform shuffles instead of marching.
+CROWD_SLOWDOWN_PER_NEIGHBOR = 0.08  # walk-speed fraction trimmed per same-band neighbour
+CROWD_MIN_SPEED_SCALE = 0.4  # floor on the density slowdown so nobody freezes
+CROWD_JUMP_DENSITY = 2  # suppress hops once this many neighbours are packed in
+CROWD_IDLE_DENSITY_GAIN = 0.5  # IDLE_CHANCE multiplier added per neighbour (pause more when packed)
+
 # Animation
 ANIM_FPS = 8.0  # clip playback rate (independent of render FPS)
 HUG_DURATION = 1.2  # seconds
