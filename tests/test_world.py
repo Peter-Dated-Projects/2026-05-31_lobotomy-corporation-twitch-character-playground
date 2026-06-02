@@ -6,13 +6,23 @@ fixture keeps wandering characters grounded so grouping geometry is stable.
 
 from __future__ import annotations
 
+import pytest
 from pygame.math import Vector2
 
 from twitch_playground import settings
 from twitch_playground.assets.provider import SpriteSet
 from twitch_playground.chat.commands import ChatCommand
 from twitch_playground.sim.character import Character, Mode
+from twitch_playground.sim.personality import Personality
 from twitch_playground.sim.world import World
+
+
+@pytest.fixture
+def no_autonomy(monkeypatch):
+    """Disable the autonomous join/leave layer so a command test exercises only
+    the command path -- otherwise the spawned characters' random personas could
+    autonomously form or dissolve clusters and perturb the assertions."""
+    monkeypatch.setattr(settings, "AUTONOMOUS_GROUPING", False)
 
 
 class _RecordingProvider:
@@ -87,7 +97,7 @@ def _ground_two(world: World):
     return a, b
 
 
-def test_follow_snaps_follower_beside_leader_anchor_stays_put(provider, calm):
+def test_follow_snaps_follower_beside_leader_anchor_stays_put(provider, calm, no_autonomy):
     world = World(provider)
     leader, follower = _ground_two(world)
     # Pin positions so the follower's walk-to-slot finishes in a bounded number
@@ -119,7 +129,7 @@ def test_follow_snaps_follower_beside_leader_anchor_stays_put(provider, calm):
     assert leader.pos == leader_pos_before  # anchor still parked
 
 
-def test_hug_reverts_both_and_does_not_freeze(provider, calm):
+def test_hug_reverts_both_and_does_not_freeze(provider, calm, no_autonomy):
     world = World(provider)
     a, b = _ground_two(world)
 
@@ -134,7 +144,7 @@ def test_hug_reverts_both_and_does_not_freeze(provider, calm):
     assert a.clip != "hug" and b.clip != "hug"
 
 
-def test_leave_dissolves_a_one_member_cluster(provider, calm):
+def test_leave_dissolves_a_one_member_cluster(provider, calm, no_autonomy):
     world = World(provider)
     a, b = _ground_two(world)
     world.handle_command(ChatCommand(cmd="follow", args=["@a"], author="b"))
@@ -148,7 +158,7 @@ def test_leave_dissolves_a_one_member_cluster(provider, calm):
     assert a.mode is Mode.WANDER and b.mode is Mode.WANDER
 
 
-def test_rejoin_pulls_sender_out_of_a_cluster(provider, calm):
+def test_rejoin_pulls_sender_out_of_a_cluster(provider, calm, no_autonomy):
     world = World(provider)
     a, b = _ground_two(world)
     world.handle_command(ChatCommand(cmd="follow", args=["@a"], author="b"))
@@ -158,3 +168,85 @@ def test_rejoin_pulls_sender_out_of_a_cluster(provider, calm):
     world.handle_command(ChatCommand(cmd="join", args=[], author="b"))
     assert b.group_id is None
     assert b.mode is Mode.WANDER
+
+
+# --- autonomous grouping (L4) -------------------------------------------------
+
+
+def _freeze_wander(monkeypatch):
+    """Pin the wander drift so test characters stay put within JOIN_RADIUS while
+    the autonomous decision plays out."""
+    monkeypatch.setattr(settings, "WANDER_DISPLACE", 0.0)
+    monkeypatch.setattr(settings, "WANDER_REORIENT_CHANCE", 0.0)
+
+
+def test_autonomous_join_forms_a_cluster(provider, calm, monkeypatch):
+    """Two eager-joiner wanderers standing near each other autonomously gravitate
+    into a cluster -- no chat command involved."""
+    _freeze_wander(monkeypatch)
+    world = World(provider)
+    a, b = world.spawn("a"), world.spawn("b")
+    # Same surface, ~40px apart: outside the separation radius (30), inside
+    # JOIN_RADIUS (140), so they neither shove apart nor drift out of range.
+    a.pos = Vector2(400, settings.GROUND_TOP)
+    b.pos = Vector2(440, settings.GROUND_TOP)
+    a._wander_heading = b._wander_heading = 0.0
+    sociable = Personality(sociability=1.0, independence=0.0, restlessness=0.0)
+    a.persona = b.persona = sociable
+    a._decide_timer = b._decide_timer = 0.0
+
+    for _ in range(300):  # 5s: clears LEAVE_DWELL, decisions fire
+        world.update(1 / 60)
+
+    assert world.groups, "an autonomous cluster should have formed"
+    assert a.group_id is not None and b.group_id is not None
+    assert a.group_id == b.group_id
+
+
+def test_autonomous_leave_when_restless_loner_in_small_cluster(provider, calm, monkeypatch):
+    """A restless contrarian stuck in a small cluster peels off on its own once
+    the commit dwell has elapsed -- the symmetric leave check."""
+    _freeze_wander(monkeypatch)
+    world = World(provider)
+    a, b = world.spawn("a"), world.spawn("b")
+    a.pos = Vector2(400, settings.GROUND_TOP)
+    b.pos = Vector2(440, settings.GROUND_TOP)
+    world.update(1 / 60)  # ground both
+    # Form the pair directly (NOT via a chat command, so no manual hold applies).
+    world._add_to_group("b", "a")
+    assert b.group_id is not None
+    # b wants out; a is an unsociable non-mover that will neither leave nor re-pull
+    # b back in (so the end-state assertion is not perturbed by a re-join).
+    b.persona = Personality(sociability=0.0, independence=0.9, restlessness=1.0)
+    a.persona = Personality(sociability=0.0, independence=1.0, restlessness=0.0)
+    b._decide_timer = 0.0
+
+    for _ in range(400):  # well past JOIN_DWELL (3s)
+        world.update(1 / 60)
+
+    assert b.group_id is None
+    assert b.mode is Mode.WANDER
+
+
+def test_chat_command_is_not_autonomously_undone(provider, calm, monkeypatch):
+    """A viewer's !follow is authoritative: within the manual-hold window the
+    autonomous leave check must not fire, even for a character that would
+    otherwise bolt immediately."""
+    _freeze_wander(monkeypatch)
+    world = World(provider)
+    a, b = world.spawn("a"), world.spawn("b")
+    a.pos = Vector2(400, settings.GROUND_TOP)
+    b.pos = Vector2(440, settings.GROUND_TOP)
+    world.update(1 / 60)
+    # b would love to leave on its own; a will not re-pull or leave.
+    b.persona = Personality(sociability=0.0, independence=0.9, restlessness=1.0)
+    a.persona = Personality(sociability=0.0, independence=1.0, restlessness=0.0)
+
+    world.handle_command(ChatCommand(cmd="follow", args=["@a"], author="b"))
+    assert b.group_id is not None
+
+    held_frames = int((settings.MANUAL_HOLD_DURATION - 1.0) / (1 / 60))
+    for _ in range(held_frames):  # ~7s, inside the 8s hold
+        world.update(1 / 60)
+
+    assert b.group_id is not None, "viewer's !follow was autonomously undone"

@@ -6,8 +6,11 @@ each test asserts an exact, frame-rate-independent outcome.
 
 from __future__ import annotations
 
+import pygame
+
 from twitch_playground import settings
 from twitch_playground.sim.character import Character, Mode
+from twitch_playground.sim.personality import Personality, personality_for
 from twitch_playground.sim.platforms import default_level
 
 
@@ -156,3 +159,57 @@ def test_emoting_plays_hug_then_reverts(make_char, calm):
 
     assert char.mode is prior_mode  # back to WANDER, not stuck EMOTING
     assert char.clip != "hug"
+
+
+# --- personality (L4) ---------------------------------------------------------
+
+
+def test_persona_defaults_to_username_derived(make_char):
+    """A Character built without an explicit persona derives one from its
+    username, so a bare Character is still deterministically seeded."""
+    char = make_char(username="zelda")
+    assert char.persona == personality_for("zelda")
+
+
+def test_persona_injection_overrides_default(sprites):
+    """World.spawn injects the persona (mirroring sprites/nameplate); an injected
+    persona is used verbatim rather than re-derived."""
+    p = Personality(sociability=0.1, independence=0.9, restlessness=0.5)
+    nameplate = pygame.Surface((10, 6), pygame.SRCALPHA)
+    char = Character("x", (50, settings.GROUND_TOP), sprites, nameplate, persona=p)
+    assert char.persona is p
+
+
+def test_tick_autonomy_fires_on_the_decide_interval(make_char, monkeypatch):
+    """The decision gate is low-frequency: it does not fire every frame, but does
+    fire (and re-arm) once the decide interval elapses."""
+    monkeypatch.setattr(settings, "DECIDE_INTERVAL", 0.4)
+    char = make_char()
+    char._manual_hold = 0.0
+    char._decide_timer = settings.DECIDE_INTERVAL
+    # One short frame is far below the interval -> not yet due.
+    assert char.tick_autonomy(0.05) is False
+    # Over a full second of 0.05s frames it must fire at least once.
+    assert any(char.tick_autonomy(0.05) for _ in range(20))
+
+
+def test_manual_hold_suppresses_the_decision(make_char):
+    """A held character never reports a decision as due, even with the decide
+    timer already elapsed -- this is what keeps a viewer command from being
+    autonomously undone."""
+    char = make_char()
+    char.hold_autonomy()
+    char._decide_timer = 0.0  # a decision would otherwise be due immediately
+    assert char.tick_autonomy(1 / 60) is False
+    assert char._manual_hold > 0.0
+
+
+def test_dwell_clock_resets_when_state_changes(make_char):
+    """The time-in-state clock accrues while the mode is stable and resets when
+    the character crosses between WANDER and GROUPED (the dwell dead-band)."""
+    char = make_char()  # starts WANDER
+    char.tick_autonomy(1.0)
+    assert char._state_elapsed >= 1.0
+    char.mode = Mode.GROUPED
+    char.tick_autonomy(1 / 60)
+    assert char._state_elapsed == 0.0

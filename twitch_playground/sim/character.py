@@ -26,6 +26,7 @@ from pygame.math import Vector2
 from twitch_playground import settings
 from twitch_playground.assets.provider import SpriteSet
 from twitch_playground.sim import steering
+from twitch_playground.sim.personality import Personality, personality_for
 from twitch_playground.sim.platforms import Platform, landing_surface
 
 
@@ -42,12 +43,17 @@ class Character:
         pos: tuple[float, float],
         sprites: SpriteSet,
         nameplate: pygame.Surface,
+        persona: Personality | None = None,
     ) -> None:
         self.username = username
         self.pos = Vector2(pos)
         self.velocity = Vector2(0, 0)
         self.sprites = sprites
         self.nameplate = nameplate
+        # Seeded personality. Normally injected by World.spawn (mirroring how
+        # sprites/nameplate are), but defaults to deriving from the username so a
+        # bare Character (tests) still has a stable persona.
+        self.persona = persona if persona is not None else personality_for(username)
 
         self.mode = Mode.WANDER
         self._prev_mode = Mode.WANDER  # restored after an EMOTING clip
@@ -69,6 +75,15 @@ class Character:
         # Start strolling at full speed in the initial facing direction.
         self._wander_heading = self._facing * settings.WALK_SPEED
         self._pause_timer = 0.0  # > 0 while taking an idle pause
+
+        # Autonomous join/leave bookkeeping (L4). The decision runs on a low-
+        # frequency tick (World drives it); these track WHEN it may next fire.
+        # A random initial phase spreads decisions across frames so the whole
+        # crowd does not re-evaluate in lockstep.
+        self._decide_timer = random.uniform(0.0, settings.DECIDE_INTERVAL)
+        self._manual_hold = 0.0  # > 0 while a viewer command suppresses autonomy
+        self._state_elapsed = 0.0  # s spent in the current WANDER/GROUPED state
+        self._autonomy_mode = self.mode  # last WANDER/GROUPED seen, for dwell reset
 
         self.last_interaction = time.monotonic()
 
@@ -110,6 +125,44 @@ class Character:
         self._prev_mode = Mode.WANDER
         self.touch()
 
+    # --- autonomy (L4) --------------------------------------------------------
+
+    def hold_autonomy(self) -> None:
+        """Suppress the autonomous join/leave check for ``MANUAL_HOLD_DURATION``.
+
+        Called by World when a viewer issues an explicit !follow / !leave / !join /
+        !hug so the AI does not immediately undo the command -- the viewer's
+        intent is authoritative; autonomy only fills the silence.
+        """
+        self._manual_hold = settings.MANUAL_HOLD_DURATION
+
+    def tick_autonomy(self, dt: float) -> bool:
+        """Advance the decide / hold / dwell timers; return True iff an autonomous
+        decision is due this frame.
+
+        Drives three things: the manual-hold countdown (viewer override), the
+        time-in-state clock used for the dwell dead-band (reset whenever we cross
+        between WANDER and GROUPED -- an EMOTING blip does not reset it), and the
+        low-frequency decide gate. Returns False while under a manual hold so a
+        viewer command is never reverted; the caller still checks the dwell clock.
+        """
+        self._manual_hold = max(0.0, self._manual_hold - dt)
+
+        relevant = (
+            self.mode if self.mode in (Mode.WANDER, Mode.GROUPED) else self._autonomy_mode
+        )
+        if relevant is not self._autonomy_mode:
+            self._autonomy_mode = relevant
+            self._state_elapsed = 0.0
+        else:
+            self._state_elapsed += dt
+
+        self._decide_timer -= dt
+        if self._decide_timer > 0.0:
+            return False
+        self._decide_timer = settings.DECIDE_INTERVAL
+        return self._manual_hold <= 0.0
+
     # --- per-frame update -----------------------------------------------------
 
     def update(
@@ -149,6 +202,12 @@ class Character:
         # less, and pauses more -- the crowd "hangs out" instead of marching.
         density = steering.local_density(self.pos, neighbors)
 
+        # Restlessness scales the hop/idle cadence: a [0, RESTLESS_RATE_SPAN]
+        # multiplier so the median character keeps ~the global rate while a calm
+        # one barely fidgets and a restless one paces and pauses constantly --
+        # visible per-character variety even before any grouping logic.
+        rest_mult = settings.RESTLESS_RATE_SPAN * self.persona.restlessness
+
         if grounded:
             if self._pause_timer > 0:
                 self._pause_timer -= dt
@@ -161,14 +220,15 @@ class Character:
                     )
             elif (
                 density < settings.CROWD_JUMP_DENSITY
-                and random.random() < settings.JUMP_CHANCE * dt
+                and random.random() < settings.JUMP_CHANCE * rest_mult * dt
             ):
                 self.velocity.y = -settings.JUMP_SPEED  # hop -> becomes airborne
                 self.platform = None
                 grounded = False
             else:
-                # Crowded characters pause more often (milling/hanging-out read).
-                idle_chance = settings.IDLE_CHANCE * (
+                # Crowded characters pause more often (milling/hanging-out read);
+                # restlessness scales how often this character pauses at all.
+                idle_chance = settings.IDLE_CHANCE * rest_mult * (
                     1.0 + density * settings.CROWD_IDLE_DENSITY_GAIN
                 )
                 if random.random() < idle_chance * dt:

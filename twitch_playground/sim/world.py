@@ -15,8 +15,9 @@ from pygame.math import Vector2
 from twitch_playground import settings
 from twitch_playground.assets.provider import AssetProvider
 from twitch_playground.chat.commands import ChatCommand, normalize_target
-from twitch_playground.sim import steering
-from twitch_playground.sim.character import Character
+from twitch_playground.sim import personality, steering
+from twitch_playground.sim.character import Character, Mode
+from twitch_playground.sim.personality import personality_for
 from twitch_playground.sim.platforms import default_level
 
 
@@ -50,6 +51,7 @@ class World:
             self.spawn(cmd.author)
             return
         char.touch()
+        char.hold_autonomy()  # viewer intent wins; do not auto-rejoin right after
         if char.group_id is not None:  # re-joining pulls you out of a cluster
             self._remove_from_group(cmd.author)
 
@@ -62,6 +64,8 @@ class World:
             return  # join-required, target must exist, no self-hug
         a.trigger_hug()
         b.trigger_hug()
+        a.hold_autonomy()
+        b.hold_autonomy()
 
     def _cmd_follow(self, cmd: ChatCommand) -> None:
         if not cmd.args:
@@ -71,9 +75,15 @@ class World:
         if follower is None or leader is None or follower is leader:
             return
         self._add_to_group(cmd.author, target)
+        # Both ends were just placed by a viewer; hold off autonomy so the AI
+        # does not immediately leave the cluster it was told to form.
+        follower.hold_autonomy()
+        leader.hold_autonomy()
 
     def _cmd_leave(self, cmd: ChatCommand) -> None:
-        if cmd.author in self.characters:
+        char = self.characters.get(cmd.author)
+        if char is not None:
+            char.hold_autonomy()  # do not auto-rejoin right after a manual leave
             self._remove_from_group(cmd.author)
 
     # --- spawning / despawning ------------------------------------------------
@@ -89,6 +99,7 @@ class World:
             pos=pos,
             sprites=self.provider.get_sprite_set(username),
             nameplate=self._build_nameplate(username),
+            persona=personality_for(username),
         )
         self.characters[username] = char
         return char
@@ -184,6 +195,89 @@ class World:
         ]
         for char in self.characters.values():
             char.update(dt, neighbors, self.platforms)
+        self._tick_autonomy(dt)
+
+    # --- autonomous grouping (L4) ---------------------------------------------
+
+    def _tick_autonomy(self, dt: float) -> None:
+        """Run each character's low-frequency join/leave decision.
+
+        Layered on top of the per-frame physics update above: the trait-biased
+        utility check (sim/personality.py) decides, and the EXISTING grouping
+        machinery (``_add_to_group`` / ``_remove_from_group``) executes -- no new
+        Mode, no FSM rewrite. ``tick_autonomy`` gates the cadence, the manual
+        hold, and the dwell clock; this method only acts when a decision is due.
+        """
+        if not settings.AUTONOMOUS_GROUPING:
+            return
+        # Snapshot the names: _add_to_group / _remove_from_group mutate group
+        # membership (never the character set), so iterating a copy is safe.
+        for username, char in list(self.characters.items()):
+            if not char.tick_autonomy(dt):
+                continue
+            if char.mode is Mode.WANDER and char.platform is not None:
+                if char._state_elapsed >= settings.LEAVE_DWELL:
+                    self._consider_join(username, char)
+            elif char.mode is Mode.GROUPED:
+                if char._state_elapsed >= settings.JOIN_DWELL:
+                    self._consider_leave(username, char)
+
+    def _consider_join(self, username: str, char: Character) -> None:
+        candidate = self._join_candidate(char)
+        if candidate is None:
+            return
+        leader, distance, crowd_size = candidate
+        if personality.join_score(char.persona, crowd_size, distance) >= settings.JOIN_ENTER_SCORE:
+            self._add_to_group(username, leader)
+
+    def _consider_leave(self, username: str, char: Character) -> None:
+        if char.group_id is None:
+            return
+        members = self.groups.get(char.group_id, [])
+        crowd_size = len(members)
+        # Dual-threshold dead-band: only consider leaving once the cluster has
+        # shrunk strictly below this character's join threshold, so the same size
+        # that pulled it in does not immediately push it out.
+        if crowd_size > personality.leave_floor(char.persona):
+            return
+        if personality.leave_score(char.persona, crowd_size, char._state_elapsed) >= settings.LEAVE_SCORE:
+            self._remove_from_group(username)
+
+    def _join_candidate(self, char: Character) -> tuple[str, float, int] | None:
+        """Nearest reachable cluster for ``char``'s join check: ``(leader, distance,
+        crowd_size)`` or None.
+
+        Reachable = on the SAME surface (matching ``platform.top``), so the joiner
+        can walk to the slot without a jump it cannot plan -- a cluster one tier up
+        is not joinable and is skipped (else the character walks into a wall under
+        an unreachable slot). ``crowd_size`` is the perceived knot: every same-
+        surface character within ``JOIN_RADIUS``, so a cluster of wanderers can
+        seed a new group, not just an already-formed one. The leader is the nearest
+        such character's group anchor if it is grouped, else that character itself.
+        """
+        if char.platform is None:
+            return None
+        nearest: Character | None = None
+        nearest_d: float | None = None
+        crowd_size = 0
+        for other in self.characters.values():
+            if other is char or other.platform is None:
+                continue
+            if abs(other.platform.top - char.platform.top) > 1.0:
+                continue  # different tier: not walk-reachable
+            d = abs(other.pos.x - char.pos.x)
+            if d > settings.JOIN_RADIUS:
+                continue
+            crowd_size += 1
+            if nearest_d is None or d < nearest_d:
+                nearest, nearest_d = other, d
+        if nearest is None or nearest_d is None:
+            return None
+        if nearest.group_id is not None:
+            leader = self.groups[nearest.group_id][0]  # join the cluster's anchor
+        else:
+            leader = nearest.username  # seed a new pair on the nearest wanderer
+        return leader, nearest_d, crowd_size
 
     # --- helpers --------------------------------------------------------------
 

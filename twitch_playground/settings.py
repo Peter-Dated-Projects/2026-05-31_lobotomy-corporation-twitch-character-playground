@@ -78,6 +78,27 @@ CROWD_MIN_SPEED_SCALE = 0.4  # floor on the density slowdown so nobody freezes
 CROWD_JUMP_DENSITY = 2  # suppress hops once this many neighbours are packed in
 CROWD_IDLE_DENSITY_GAIN = 0.5  # IDLE_CHANCE multiplier added per neighbour (pause more when packed)
 
+# Personality (L4): per-character traits + autonomous follow/leave. Traits are
+# derived deterministically from the username (see sim/personality.py) and bias a
+# low-frequency utility check that joins/leaves clusters on its own, layered onto
+# the command-driven FSM without replacing it. Liveliness lives in these knobs;
+# expect to tune by eye.
+AUTONOMOUS_GROUPING = True  # master switch for the autonomous join/leave checks
+MAX_JOIN_THRESHOLD = 5  # Granovetter ceiling: the most solitary character needs a
+#                         knot of up to 1 + this many same-surface peers to join
+DECIDE_INTERVAL = 0.4  # s between autonomous decisions (~2.5 Hz); cheap, and the
+#                        low cadence doubles as oscillation damping
+JOIN_RADIUS = 140.0  # px; same-surface horizontal reach for sensing a cluster
+JOIN_ENTER_SCORE = 0.4  # join utility must clear this to autonomously join
+LEAVE_SCORE = 0.4  # leave utility must clear this to autonomously leave
+JOIN_DWELL = 3.0  # min s grouped before a leave check may fire (commit dwell)
+LEAVE_DWELL = 2.0  # min s wandering before a join check may fire (rejoin cooldown)
+MANUAL_HOLD_DURATION = 8.0  # s a chat command suppresses the autonomous check, so
+#                             the AI never immediately undoes a viewer's !follow/!leave
+RESTLESS_RATE_SPAN = 2.0  # restlessness in [0,1] maps to a [0, SPAN] multiplier on
+#                           JUMP_CHANCE / IDLE_CHANCE, so the median character keeps
+#                           ~the global rate while calm/restless ones visibly diverge
+
 # Animation
 ANIM_FPS = 8.0  # clip playback rate (independent of render FPS)
 HUG_DURATION = 1.2  # seconds
