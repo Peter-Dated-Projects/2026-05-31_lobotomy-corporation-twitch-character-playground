@@ -186,10 +186,18 @@ class LobCorpProvider:
     safety net.
 
     One SpriteSheetCache is shared across every character so each sheet is read
-    and segmented only once. Results are cached per character_id. If compositing
-    a character raises for any reason (asset drop missing, sheet unreadable,
-    variant index out of range), that character silently falls back to
-    PlaceholderProvider art and a single warning is logged for the session.
+    and segmented only once. Results are cached per RESOLVED character (the
+    CharacterDef name from _resolve), not per character_id, so many viewer
+    usernames that map to the same look share one SpriteSet and the cache stays
+    bounded by the ~10 distinct character defs regardless of viewer count. This
+    matters because each SpriteSet is large (3 emotion faces x 4 clips of
+    composited frames), so keying by username would scale memory with the viewer
+    count for only a handful of real looks. Sharing is safe: SpriteSets are
+    immutable frame lists; per-character runtime state (emotion, anim) lives on
+    Character, not the SpriteSet. If compositing a character raises for any
+    reason (asset drop missing, sheet unreadable, variant index out of range),
+    that character silently falls back to PlaceholderProvider art and a single
+    warning is logged for the session.
     """
 
     def __init__(self) -> None:
@@ -199,14 +207,17 @@ class LobCorpProvider:
         self._warned = False
 
     def get_sprite_set(self, character_id: str) -> SpriteSet:
-        if character_id not in self._cache:
-            char_def = self._resolve(character_id)
+        char_def = self._resolve(character_id)
+        key = char_def.name
+        if key not in self._cache:
             try:
-                self._cache[character_id] = self._build(char_def)
+                self._cache[key] = self._build(char_def)
             except Exception as exc:  # any load/extract failure -> degrade
                 self._warn(character_id, exc)
-                self._cache[character_id] = self._fallback.get_sprite_set(character_id)
-        return self._cache[character_id]
+                # Key the fallback by the resolved name too, so the placeholder
+                # cache is bounded by distinct characters, not viewer count.
+                self._cache[key] = self._fallback.get_sprite_set(key)
+        return self._cache[key]
 
     def _resolve(self, character_id: str) -> CharacterDef:
         """Map a character_id to a CharacterDef.
