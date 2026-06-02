@@ -8,9 +8,37 @@ from __future__ import annotations
 
 from pygame.math import Vector2
 
+from twitch_playground.assets.provider import SpriteSet
 from twitch_playground.chat.commands import ChatCommand
 from twitch_playground.sim.character import Mode
 from twitch_playground.sim.world import World
+
+
+class _RecordingProvider:
+    """AssetProvider that records every character_id requested, so a test can
+    assert World.spawn passes each viewer's own identity through. Delegates the
+    actual SpriteSet to the placeholder provider -- no real assets needed."""
+
+    def __init__(self, inner):
+        self.inner = inner
+        self.requested: list[str] = []
+
+    def get_sprite_set(self, character_id: str) -> SpriteSet:
+        self.requested.append(character_id)
+        return self.inner.get_sprite_set(character_id)
+
+
+def test_spawn_requests_each_viewers_own_character_id(provider):
+    """Distinct viewers must request distinct character ids (their usernames),
+    not a shared hardcoded type -- otherwise every viewer renders identically."""
+    recorder = _RecordingProvider(provider)
+    world = World(recorder)
+
+    usernames = ["viewer1", "viewer2", "viewer3"]
+    for u in usernames:
+        world.spawn(u)
+
+    assert recorder.requested == usernames
 
 
 def _ground_two(world: World):

@@ -18,8 +18,6 @@ from twitch_playground.chat.commands import ChatCommand, normalize_target
 from twitch_playground.sim.character import Character
 from twitch_playground.sim.platforms import default_level
 
-_CHARACTER_TYPE = "default"  # one placeholder type for v0
-
 
 class World:
     def __init__(self, provider: AssetProvider) -> None:
@@ -88,7 +86,7 @@ class World:
         char = Character(
             username=username,
             pos=pos,
-            sprites=self.provider.get_sprite_set(_CHARACTER_TYPE),
+            sprites=self.provider.get_sprite_set(username),
             nameplate=self._build_nameplate(username),
         )
         self.characters[username] = char
