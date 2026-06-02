@@ -8,9 +8,9 @@ tests headlessly, and can be edited without a graphics stack present.
 
 Filenames here are the FULL sheet names as they exist on disk, including the
 "-resources.assets-NNNN.png" suffix (see the sprite-sheet catalog). Variant
-indices are 0-based, in the extraction reading order, and are transcribed
-verbatim from the character table -- a few may need a one-time visual
-calibration pass after extraction (flagged with `# calibrate`).
+indices are 0-based, in the extraction reading order, and have been calibrated
+against the actual extract_sprites() counts on the real sheets (2026-06-01), so
+every referenced index is guaranteed in-range.
 """
 
 from __future__ import annotations
@@ -50,6 +50,8 @@ class CharacterDef:
 # --- Sheet filenames (full, on-disk names) --------------------------------
 # Outfits (Employee Clothes and Weapons folder).
 AGENT = "Agent-resources.assets-1521.png"
+# Agent2 has only 6 extracted variants -- too few to serve as a clothes sheet
+# (the walk clip indexes clothes limbs up to 10), so it is not used as an outfit.
 AGENT2 = "Agent2-resources.assets-1782.png"
 OFFICER_BINAH = "Officer_Binah-resources.assets-2969.png"
 OFFICER_CHESED = "Officer_Chesed-resources.assets-1278.png"
@@ -118,8 +120,10 @@ def _mouth(default: CharacterLayer, *, battle: int = 0, panic: int = 0) -> dict[
 
 
 # --- The 10 named characters ----------------------------------------------
-# Variant indices are transcribed verbatim from the character table.
-# `# calibrate` marks an index that may shift after the extraction pass.
+# Variant indices have been calibrated against the actual extraction counts on
+# the real sheets (2026-06-01); every index below is in-range for its sheet.
+# Note Mouth_1 yields only a single sprite (index 0) -- connected-component
+# extraction merges its glyphs -- so every default-mouth reference is v0.
 
 _DEFS: list[CharacterDef] = [
     CharacterDef(
@@ -138,9 +142,9 @@ _DEFS: list[CharacterDef] = [
         rear_hair=CharacterLayer(REAR_HAIR, 1),
         front_hair=CharacterLayer(FRONT_HAIR, 1),
         clothes=OFFICER_CHESED,
-        eyes=_eyes(CharacterLayer(EYE_DEFAULT, 3)),  # calibrate
-        eyebrows=_brows(CharacterLayer(BROW_DEFAULT, 3)),  # calibrate
-        mouth=_mouth(CharacterLayer(MOUTH_DEFAULT, 4)),  # calibrate
+        eyes=_eyes(CharacterLayer(EYE_DEFAULT, 3)),
+        eyebrows=_brows(CharacterLayer(BROW_DEFAULT, 3)),
+        mouth=_mouth(CharacterLayer(MOUTH_DEFAULT, 0)),  # Mouth_1 yields only v0
         glasses=None,
         weapon=None,
     ),
@@ -151,7 +155,7 @@ _DEFS: list[CharacterDef] = [
         clothes=OFFICER_BINAH,
         # Binah's resting face is a dead/dull stare and a battle brow.
         eyes=_eyes(CharacterLayer(EYE_DEAD, 0)),
-        eyebrows=_brows(CharacterLayer(BROW_BATTLE, 3)),  # calibrate
+        eyebrows=_brows(CharacterLayer(BROW_BATTLE, 3)),
         mouth=_mouth(CharacterLayer(MOUTH_DEFAULT, 0)),
         glasses=None,
         weapon=None,
@@ -159,10 +163,10 @@ _DEFS: list[CharacterDef] = [
     CharacterDef(
         name="Officer Geburah",
         rear_hair=CharacterLayer(REAR_HAIR, 2),
-        front_hair=CharacterLayer(FRONT_HAIR, 8),  # calibrate
+        front_hair=CharacterLayer(FRONT_HAIR, 8),
         clothes=OFFICER_GEBURAH,
-        eyes=_eyes(CharacterLayer(EYE_DEFAULT, 15)),  # calibrate
-        eyebrows=_brows(CharacterLayer(BROW_BATTLE, 2)),  # calibrate
+        eyes=_eyes(CharacterLayer(EYE_DEFAULT, 15)),
+        eyebrows=_brows(CharacterLayer(BROW_BATTLE, 2)),
         mouth=_mouth(CharacterLayer(MOUTH_BATTLE, 0)),
         glasses=None,
         weapon=CharacterLayer(SPEAR, 0),
@@ -170,7 +174,7 @@ _DEFS: list[CharacterDef] = [
     CharacterDef(
         name="Officer Netzach",
         rear_hair=CharacterLayer(REAR_HAIR, 3),
-        front_hair=CharacterLayer(FRONT_HAIR, 4),  # calibrate
+        front_hair=CharacterLayer(FRONT_HAIR, 4),
         clothes=OFFICER_NETZACH,
         # Netzach is perpetually weary/panicked.
         eyes=_eyes(CharacterLayer(EYE_PANIC, 0)),
@@ -182,55 +186,57 @@ _DEFS: list[CharacterDef] = [
     CharacterDef(
         name="Officer Hod",
         rear_hair=CharacterLayer(REAR_HAIR, 2),
-        front_hair=CharacterLayer(FRONT_HAIR, 6),  # calibrate
+        front_hair=CharacterLayer(FRONT_HAIR, 6),
         clothes=OFFICER_HOD,
-        eyes=_eyes(CharacterLayer(EYE_DEFAULT, 5)),  # calibrate
-        eyebrows=_brows(CharacterLayer(BROW_DEFAULT, 4)),  # calibrate
-        mouth=_mouth(CharacterLayer(MOUTH_DEFAULT, 3)),  # calibrate
+        eyes=_eyes(CharacterLayer(EYE_DEFAULT, 5)),
+        eyebrows=_brows(CharacterLayer(BROW_DEFAULT, 4)),
+        mouth=_mouth(CharacterLayer(MOUTH_DEFAULT, 0)),  # Mouth_1 yields only v0
         glasses=None,
         weapon=CharacterLayer(BOWGUN, 0),
     ),
     CharacterDef(
         name="Officer Malkut",
         rear_hair=CharacterLayer(REAR_HAIR, 3),
-        front_hair=CharacterLayer(FRONT_HAIR, 7),  # calibrate
+        front_hair=CharacterLayer(FRONT_HAIR, 7),
         clothes=OFFICER_MALKUT,
-        eyes=_eyes(CharacterLayer(EYE_DEFAULT, 8)),  # calibrate
-        eyebrows=_brows(CharacterLayer(BROW_DEFAULT, 5)),  # calibrate
-        mouth=_mouth(CharacterLayer(MOUTH_DEFAULT, 2)),  # calibrate
+        eyes=_eyes(CharacterLayer(EYE_DEFAULT, 8)),
+        eyebrows=_brows(CharacterLayer(BROW_DEFAULT, 5)),
+        mouth=_mouth(CharacterLayer(MOUTH_DEFAULT, 0)),  # Mouth_1 yields only v0
         glasses=None,
         weapon=CharacterLayer(RIFLE, 0),
     ),
     CharacterDef(
         name="Officer Yesod",
         rear_hair=CharacterLayer(REAR_HAIR, 4),
-        front_hair=CharacterLayer(FRONT_HAIR, 9),  # calibrate
+        front_hair=CharacterLayer(FRONT_HAIR, 9),
         clothes=OFFICER_YESOD,
-        eyes=_eyes(CharacterLayer(EYE_DEFAULT, 12)),  # calibrate
-        eyebrows=_brows(CharacterLayer(BROW_DEFAULT, 6)),  # calibrate
-        mouth=_mouth(CharacterLayer(MOUTH_DEFAULT, 5)),  # calibrate
+        eyes=_eyes(CharacterLayer(EYE_DEFAULT, 12)),
+        eyebrows=_brows(CharacterLayer(BROW_DEFAULT, 6)),
+        mouth=_mouth(CharacterLayer(MOUTH_DEFAULT, 0)),  # Mouth_1 yields only v0
         glasses=None,
         weapon=CharacterLayer(PISTOL, 0),
     ),
     CharacterDef(
         name="Panicked Worker",
         rear_hair=CharacterLayer(REAR_HAIR, 0),
-        front_hair=CharacterLayer(FRONT_HAIR, 2),  # calibrate
+        front_hair=CharacterLayer(FRONT_HAIR, 2),
         clothes=AGENT,
-        eyes=_eyes(CharacterLayer(EYE_PANIC, 4)),  # calibrate
-        eyebrows=_brows(CharacterLayer(BROW_PANIC, 2)),  # calibrate
-        mouth=_mouth(CharacterLayer(MOUTH_PANIC, 1)),  # calibrate
+        eyes=_eyes(CharacterLayer(EYE_PANIC, 4)),
+        eyebrows=_brows(CharacterLayer(BROW_PANIC, 2)),
+        mouth=_mouth(CharacterLayer(MOUTH_PANIC, 1)),
         glasses=None,
         weapon=CharacterLayer(DEFAULT_WEAPON, 0),
     ),
     CharacterDef(
         name="Battle-Ready Agent",
         rear_hair=CharacterLayer(REAR_HAIR, 3),
-        front_hair=CharacterLayer(FRONT_HAIR, 11),  # calibrate
-        clothes=AGENT2,
-        eyes=_eyes(CharacterLayer(EYE_DEFAULT, 20)),  # calibrate
-        eyebrows=_brows(CharacterLayer(BROW_BATTLE, 1)),  # calibrate
-        mouth=_mouth(CharacterLayer(MOUTH_BATTLE, 1)),  # calibrate
+        front_hair=CharacterLayer(FRONT_HAIR, 11),
+        # Agent2 packs only 6 variants, but the walk clip indexes clothes limbs
+        # up to 3 + 7 = 10, so it needs an 11+ variant sheet -- use Agent.
+        clothes=AGENT,
+        eyes=_eyes(CharacterLayer(EYE_DEFAULT, 20)),
+        eyebrows=_brows(CharacterLayer(BROW_BATTLE, 1)),
+        mouth=_mouth(CharacterLayer(MOUTH_BATTLE, 1)),
         glasses=None,
         weapon=CharacterLayer(HAMMER, 0),
     ),
