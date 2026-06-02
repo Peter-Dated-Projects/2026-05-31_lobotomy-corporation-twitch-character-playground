@@ -234,6 +234,59 @@ def test_rejoin_pulls_sender_out_of_a_cluster(provider, calm, no_autonomy):
     assert b.mode is Mode.WANDER
 
 
+# --- wide-short stage geometry (1920x200) -------------------------------------
+
+
+def test_character_walks_the_full_stage_width(provider, calm, monkeypatch):
+    """A grounded character can stroll the full 1920-wide ground without leaving
+    the playfield -- it clamps/turns at the walls, it does not fall off or stick."""
+    _freeze_wander(monkeypatch)
+    world = World(provider)
+    char = world.spawn("walker")
+    world.update(1 / 60)  # bind to the ground
+    assert char.platform is world.platforms[0]
+
+    # Park at the left wall and give it a steady rightward heading.
+    char.pos = Vector2(settings.WALL_MARGIN, settings.GROUND_TOP)
+    char._wander_heading = settings.WALK_SPEED
+    char.velocity = Vector2(settings.WALK_SPEED, 0)
+
+    max_x = char.pos.x
+    # ~1850px to cross at WALK_SPEED (60px/s) is ~31s; give a comfortable margin.
+    for _ in range(2400):  # 40s at dt=1/60
+        world.update(1 / 60)
+        assert char.platform is world.platforms[0]  # stays grounded the whole way
+        assert 0 <= char.pos.x <= settings.SCREEN_W  # never leaves the screen
+        max_x = max(max_x, char.pos.x)
+
+    # It actually traversed the wide stage rather than stalling near the start.
+    assert max_x >= settings.SCREEN_W - 100
+
+
+def test_character_jumps_onto_the_floating_tier(provider, calm, monkeypatch):
+    """A hop from the ground directly below a floating slab lands the character on
+    that slab -- the reachability invariant exercised through the real physics."""
+    _freeze_wander(monkeypatch)
+    world = World(provider)
+    slab = world.platforms[1]  # a floating slab
+    char = world.spawn("jumper")
+    world.update(1 / 60)  # bind to the ground
+
+    # Stand directly under the slab's center and hop straight up.
+    char.pos = Vector2(slab.center_x, settings.GROUND_TOP)
+    char.velocity = Vector2(0.0, -settings.JUMP_SPEED)
+    char._wander_heading = 0.0
+    char.platform = None  # airborne
+
+    for _ in range(120):  # 2s: rise to apex and fall back onto the slab
+        world.update(1 / 60)
+        if char.platform is slab:
+            break
+
+    assert char.platform is slab, "character failed to land on the floating tier"
+    assert char.pos.y == slab.top
+
+
 # --- autonomous grouping (L4) -------------------------------------------------
 
 

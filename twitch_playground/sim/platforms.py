@@ -25,16 +25,20 @@ class Platform:
 
 
 def default_level() -> list[Platform]:
-    """Ground plus a symmetric set of reachable floating platforms.
+    """Full-width ground plus a single reachable floating tier.
 
-    Heights are tuned so each tier is within one jump of the tier below
-    (see settings.JUMP_SPEED / GRAVITY)."""
+    The stage is wide and short (1920x200), so there is only room for ONE tier
+    above the ground -- rendered as two long slabs flanking a central gap to use
+    the width. Its height is one jump above the ground: the 70px gap sits inside
+    the ~96px jump apex (see settings.JUMP_SPEED / GRAVITY), so it is reachable in
+    a single hop, and feet at GROUND_TOP-70 leave the sprite + nameplate clear of
+    the top of the screen."""
     w = settings.SCREEN_W
+    tier = settings.GROUND_TOP - 70  # one jump up from the ground
     return [
-        Platform(0, w, settings.GROUND_TOP),          # ground (index 0)
-        Platform(130, 330, settings.GROUND_TOP - 95),  # left
-        Platform(w - 330, w - 130, settings.GROUND_TOP - 95),  # right
-        Platform(w / 2 - 90, w / 2 + 90, settings.GROUND_TOP - 185),  # center high
+        Platform(0, w, settings.GROUND_TOP),  # ground (index 0)
+        Platform(300, 760, tier),             # left floating slab
+        Platform(w - 760, w - 300, tier),     # right floating slab
     ]
 
 

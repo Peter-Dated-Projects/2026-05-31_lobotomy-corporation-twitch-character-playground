@@ -3,8 +3,9 @@
 import os
 
 # Window / render
-SCREEN_W = 960
-SCREEN_H = 540
+SCREEN_W = 1920  # wide letterbox stage (1080p width cap)
+SCREEN_H = 200  # short band: ~1/3 the old height, so the level is re-tuned for it
+#                 (GROUND_TOP / JUMP_SPEED / default_level below) rather than swapped
 FPS = 12  # deliberate low-fps / stop-motion look; movement is delta-time based
 CAPTION = "LobCorp Twitch Playground"
 BG_COLOR = (24, 26, 32)
@@ -31,11 +32,15 @@ MAX_FORCE = 240.0  # px/s^2; cap on how sharply horizontal velocity can change
 
 # Sidescroller physics (px, px/s, px/s^2). Smaller y is higher on screen, so a
 # jump is a negative y velocity and gravity is positive.
-GROUND_TOP = SCREEN_H - 60  # feet-y of the ground surface
+GROUND_TOP = SCREEN_H - 40  # feet-y of the ground surface; leaves a ~40px ground
+#                             band at the bottom and ~160px of headroom above it
+#                             for the single floating tier + jump arc.
 GRAVITY = 1200.0
-JUMP_SPEED = 580.0  # initial hop speed; apex ~JUMP_SPEED^2/(2*GRAVITY) ~= 140px,
-#                     comfortably above the 95px gap between platform tiers, so
-#                     every tier is reachable in a single jump from the one below.
+JUMP_SPEED = 480.0  # initial hop speed; apex ~JUMP_SPEED^2/(2*GRAVITY) ~= 96px.
+#                     Lowered from 580 (apex 140): on the short 200px stage a 140px
+#                     arc would fling a character nearly off the top. 96px still
+#                     clears the single floating tier's 70px gap with ~26px margin,
+#                     so that tier stays reachable in one jump from the ground.
 WALK_SPEED = 60.0  # horizontal stroll speed on a surface
 
 # Wander decisions. Chances are per-second and multiplied by dt for a per-frame
