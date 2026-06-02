@@ -52,13 +52,17 @@ def test_spawn_requests_each_viewers_own_character_id(provider):
     assert recorder.requested == usernames
 
 
-def test_update_builds_one_shared_neighbor_snapshot(provider, monkeypatch):
-    """World.update builds the neighbour records ONCE per frame -- one list,
-    handed to every character, carrying a frame-start (pos, facing, vx) snapshot
-    decoupled from the live characters (the L3+ shared-plumbing contract)."""
+def test_update_builds_records_once_and_hands_a_grid_candidate_slice(provider, monkeypatch):
+    """World.update builds the neighbour records ONCE per frame (a frame-start
+    (pos, facing, vx) snapshot decoupled from the live characters) and hands each
+    character a grid-filtered candidate slice -- its own horizontal cell +/- 1 --
+    rather than the full list. Two characters within one cell still see each
+    other, and the records are shared by identity (built once, not re-snapshotted
+    per character)."""
     world = World(provider)
     a = world.spawn("a")
     b = world.spawn("b")
+    # Both within one GRID_CELL of each other, so each sees the other's record.
     a.pos = Vector2(100, settings.GROUND_TOP)
     b.pos = Vector2(140, settings.GROUND_TOP)
     a.velocity = Vector2(25, 0)
@@ -74,18 +78,78 @@ def test_update_builds_one_shared_neighbor_snapshot(provider, monkeypatch):
     monkeypatch.setattr(Character, "update", spy)
     world.update(1 / 60)
 
-    # Same list object handed to every character -- a single shared scan.
-    assert captured["a"] is captured["b"]
-    recs = captured["a"]
-    assert len(recs) == 2
+    # Each character's candidate slice carries both records (same cell neighbourhood).
+    for who in ("a", "b"):
+        by_x = {round(r.pos.x): r for r in captured[who]}
+        assert by_x[100].facing == 1 and by_x[100].vx == 25
+        assert by_x[140].facing == -1 and by_x[140].vx == -15
 
-    by_x = {round(r.pos.x): r for r in recs}
-    assert by_x[100].facing == 1 and by_x[100].vx == 25
-    assert by_x[140].facing == -1 and by_x[140].vx == -15
+    # Records are built once: the same record object appears across both slices,
+    # not a fresh per-character snapshot.
+    rec_in_a = next(r for r in captured["a"] if round(r.pos.x) == 100)
+    rec_in_b = next(r for r in captured["b"] if round(r.pos.x) == 100)
+    assert rec_in_a is rec_in_b
 
     # The record snapshots pos, so a later character move does not rewrite it.
     a.pos.x = 999
-    assert by_x[100].pos.x == 100
+    assert rec_in_a.pos.x == 100
+
+
+def test_grid_candidates_match_bruteforce(provider):
+    """The grid candidate slice must reproduce the brute-force scan exactly: for a
+    random layout, every steering/contagion rule evaluated over a character's own
+    cell +/- 1 must equal the same rule evaluated over the full neighbour list.
+    This is the correctness guarantee behind the O(N^2) -> O(N) swap."""
+    import random as _random
+
+    from twitch_playground.sim import steering
+    from twitch_playground.sim.character import Neighbor
+    from twitch_playground.sim.world import _bucket_by_cell, _candidates_for
+
+    rng = _random.Random(1234)
+    cell = settings.GRID_CELL
+
+    # Spread N characters across the full screen width and across several
+    # surface heights so the same-band (HSEP_Y_BAND) filter is actually exercised.
+    heights = [settings.GROUND_TOP - 95 * tier for tier in range(4)]
+    records = [
+        Neighbor(
+            Vector2(
+                rng.uniform(settings.WALL_MARGIN, settings.SCREEN_W - settings.WALL_MARGIN),
+                rng.choice(heights) + rng.uniform(-6.0, 6.0),
+            ),
+            rng.choice((-1, 1)),
+            rng.uniform(-settings.MAX_SPEED, settings.MAX_SPEED),
+            rng.uniform(0.0, 1.0),
+            rng.uniform(-1.0, 1.0),
+            rng.uniform(settings.EMOTION_TRAIT_MIN, 1.0),
+        )
+        for _ in range(300)
+    ]
+    buckets = _bucket_by_cell(records, cell)
+
+    def contagion_set(pos, neighbors):
+        # The records (by identity) that contagion would actually pull from.
+        return {
+            id(n)
+            for n in neighbors
+            if 0.0 < pos.distance_to(n.pos) <= settings.CONTAGION_RADIUS
+        }
+
+    for rec in records:
+        pos = rec.pos
+        candidates = _candidates_for(buckets, pos.x, cell)
+        assert steering.separation_push(pos, candidates) == pytest.approx(
+            steering.separation_push(pos, records)
+        )
+        assert steering.cohesion_pull(pos, candidates) == pytest.approx(
+            steering.cohesion_pull(pos, records)
+        )
+        assert steering.alignment_nudge(pos, candidates) == pytest.approx(
+            steering.alignment_nudge(pos, records)
+        )
+        assert steering.local_density(pos, candidates) == steering.local_density(pos, records)
+        assert contagion_set(pos, candidates) == contagion_set(pos, records)
 
 
 def _ground_two(world: World):

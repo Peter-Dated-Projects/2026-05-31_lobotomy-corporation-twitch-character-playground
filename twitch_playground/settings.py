@@ -129,6 +129,27 @@ PANIC_AROUSAL_EXIT = 0.25
 BATTLE_AROUSAL_ENTER = 0.50
 BATTLE_AROUSAL_EXIT = 0.35
 
+# Spatial acceleration (1D horizontal bucket grid). The per-frame neighbour
+# interaction was O(N^2) -- every character vs every other -- which is the wall on
+# crowd size. Because motion is surface-bound and ~1D-per-surface, World.update
+# buckets characters by floor(pos.x / GRID_CELL) once per frame and hands each one
+# only its own bucket +/- 1 as candidate neighbours (a near-constant-time lookup
+# instead of the full list). Defined here, below the radii it depends on.
+#
+# CORRECTNESS INVARIANT: GRID_CELL must be >= the largest interaction radius any
+# consumer uses. With cell >= max radius, every neighbour within that radius is
+# guaranteed to fall in the agent's own cell or an adjacent one, so the bucket
+# +/-1 candidate slice loses nobody. We derive it from the live radii (rather than
+# hardcoding) so it stays correct if any radius is retuned -- adding a wider-radius
+# rule auto-widens the cell.
+GRID_CELL = max(
+    HSEP_RADIUS,
+    CROWD_COH_RADIUS,
+    CROWD_ALI_RADIUS,
+    CROWD_DENSITY_RADIUS,
+    CONTAGION_RADIUS,
+)
+
 # Command-driven emotion impulses (an OCC-style appraised event: an instantaneous
 # clamped nudge to the target's valence/arousal). !hug also keeps its EMOTING clip.
 HUG_VALENCE_IMPULSE = 0.4

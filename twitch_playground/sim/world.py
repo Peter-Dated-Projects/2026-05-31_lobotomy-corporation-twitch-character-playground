@@ -228,8 +228,18 @@ class World:
             )
             for c in self.characters.values()
         ]
+        # Bucket the records into a 1D horizontal grid ONCE per frame, then hand
+        # each character only its own cell +/- 1 as candidate neighbours instead
+        # of the full list. With GRID_CELL >= the largest interaction radius this
+        # candidate slice still contains every neighbour any rule could reach (see
+        # settings.GRID_CELL), so the result is identical to the brute-force scan
+        # while the cost drops from O(N^2) toward O(N). The steering helpers and
+        # contagion still skip out-of-band / out-of-range records themselves.
+        cell = settings.GRID_CELL
+        buckets = _bucket_by_cell(neighbors, cell)
         for char in self.characters.values():
-            char.update(dt, neighbors, self.platforms)
+            candidates = _candidates_for(buckets, char.pos.x, cell)
+            char.update(dt, candidates, self.platforms)
         self._tick_autonomy(dt)
 
     # --- autonomous grouping (L4) ---------------------------------------------
@@ -325,3 +335,42 @@ class World:
             plate.blit(self._font.render(username, True, outline), (ox, oy))
         plate.blit(main, (1, 1))
         return plate
+
+
+# --- 1D spatial grid (neighbour-query acceleration) --------------------------
+# Pure module-level helpers (no World/pygame state) so the bucketing is unit-
+# testable in isolation against a brute-force scan. See settings.GRID_CELL for
+# the correctness invariant (cell >= largest interaction radius => own cell +/- 1
+# captures every reachable neighbour).
+
+
+def _bucket_by_cell(neighbors: list[Neighbor], cell: float) -> dict[int, list[Neighbor]]:
+    """Bucket neighbour records into a 1D horizontal grid keyed by ``floor(x/cell)``.
+
+    One pass over the frame's records. Character x is clamped to the screen
+    margins (always positive), so ``int(x // cell)`` floors cleanly into a cell.
+    """
+    buckets: dict[int, list[Neighbor]] = {}
+    for n in neighbors:
+        buckets.setdefault(int(n.pos.x // cell), []).append(n)
+    return buckets
+
+
+def _candidates_for(buckets: dict[int, list[Neighbor]], x: float, cell: float) -> list[Neighbor]:
+    """The candidate neighbour slice for a character at horizontal ``x``: its own
+    cell plus the two adjacent cells.
+
+    With ``cell >= max interaction radius`` this slice is a superset of every
+    neighbour any steering/contagion rule could reach, so feeding it to the rules
+    yields results identical to scanning the full list -- the rules still drop
+    out-of-band / out-of-range records via their own distance tests. The agent's
+    own record is included (the rules skip it via their ``dist > 0`` / ``d > 0``
+    guards, exactly as with the full list).
+    """
+    c = int(x // cell)
+    out: list[Neighbor] = []
+    for k in (c - 1, c, c + 1):
+        bucket = buckets.get(k)
+        if bucket:
+            out.extend(bucket)
+    return out
