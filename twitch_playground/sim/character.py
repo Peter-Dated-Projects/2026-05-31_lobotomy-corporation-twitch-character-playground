@@ -16,9 +16,11 @@ velocity and gravity is positive.
 
 from __future__ import annotations
 
+import hashlib
 import random
 import time
 from enum import Enum, auto
+from typing import NamedTuple
 
 import pygame
 from pygame.math import Vector2
@@ -34,6 +36,57 @@ class Mode(Enum):
     WANDER = auto()
     GROUPED = auto()
     EMOTING = auto()
+
+
+class Neighbor(NamedTuple):
+    """The per-frame snapshot of one character, built ONCE by ``World.update``
+    and shared by every consumer so the neighbour list is scanned a single time.
+
+    Supersets the L3 steering record ``(pos, facing, vx)`` with the L5 emotion
+    fields ``(arousal, valence, expressiveness)`` so emotional contagion reuses
+    the same shared scan -- no extra spatial query. The pure steering helpers in
+    ``sim.steering`` read only the first three fields and duck-type their input,
+    so this richer record is a drop-in everywhere ``steering.Neighbor`` was used.
+
+    ``pos`` is a frame-start copy (so a rule never sees a neighbour move
+    mid-frame); ``facing``/``vx`` carry heading for alignment; the emotion fields
+    let a neighbour infect this character in ``Character._update_emotion``.
+    """
+
+    pos: Vector2
+    facing: int
+    vx: float
+    arousal: float
+    valence: float
+    expressiveness: float
+
+
+# Salt prefix for the emotion-trait digest. Deliberately DIFFERENT from both the
+# appearance hash (bare username, in assign_character) and the persona hash
+# ("persona:", in sim/personality.py) so a character's emotional temperament is
+# decorrelated from its look AND its grouping behaviour.
+_EMOTION_SALT = "emotion:"
+_EMOTION_WINDOW = 0xFFFF  # 16-bit window carved from the md5 digest
+
+
+def _emotion_traits(username: str) -> tuple[float, float]:
+    """Deterministically derive ``(susceptibility, expressiveness)`` in
+    ``[EMOTION_TRAIT_MIN, 1.0]`` from ``username``.
+
+    susceptibility = how much my neighbours' mood moves me; expressiveness = how
+    much I move theirs. md5 (not Python's per-process-salted ``hash``) so a given
+    viewer is the same calm anchor or panic amplifier across restarts, matching
+    the stability guarantee of the appearance/persona seeds. Two independent
+    16-bit windows of one digest, mapped into the [MIN, 1.0] band so nobody is a
+    perfect non-conductor.
+    """
+    digest = hashlib.md5(f"{_EMOTION_SALT}{username}".encode("utf-8")).hexdigest()
+    h = int(digest, 16)
+    raw_sus = ((h >> 0) & _EMOTION_WINDOW) / _EMOTION_WINDOW
+    raw_exp = ((h >> 16) & _EMOTION_WINDOW) / _EMOTION_WINDOW
+    lo = settings.EMOTION_TRAIT_MIN
+    span = 1.0 - lo
+    return lo + span * raw_sus, lo + span * raw_exp
 
 
 class Character:
@@ -85,6 +138,16 @@ class Character:
         self._state_elapsed = 0.0  # s spent in the current WANDER/GROUPED state
         self._autonomy_mode = self.mode  # last WANDER/GROUPED seen, for dwell reset
 
+        # Emotion (L5): a continuous mood orthogonal to Mode -- a character can be
+        # panicked while wandering. Updated every frame (decay + contagion +
+        # crowding) and quantized to a face. susceptibility/expressiveness are the
+        # per-agent contagion knobs, seeded from the username so a viewer is a
+        # consistent calm anchor or panic amplifier across restarts.
+        self.valence = 0.0  # -1 distressed, 0 neutral, +1 happy
+        self.arousal = 0.0  # 0 calm, 1 maxed out
+        self.susceptibility, self.expressiveness = _emotion_traits(username)
+        self._emotion_face = "default"  # last quantized face (held for hysteresis)
+
         self.last_interaction = time.monotonic()
 
     @property
@@ -107,7 +170,19 @@ class Character:
         self.clip = "hug"
         self.frame_index = 0.0
         self.emote_timer = settings.HUG_DURATION
+        self.apply_emotion(d_valence=settings.HUG_VALENCE_IMPULSE)  # a hug lifts the mood
         self.touch()
+
+    def apply_emotion(self, d_valence: float = 0.0, d_arousal: float = 0.0) -> None:
+        """Apply an instantaneous, clamped emotion impulse (an appraised event).
+
+        Chat commands route through here: a command IS the appraised event, so we
+        skip OCC goals/standards machinery and just nudge the mood, clamped to the
+        valid ranges. Decay (in ``_update_emotion``) then relaxes it back over the
+        next few seconds, so an impulse reads as a spike, not a latch.
+        """
+        self.valence = max(-1.0, min(1.0, self.valence + d_valence))
+        self.arousal = max(0.0, min(1.0, self.arousal + d_arousal))
 
     def set_grouped(self, gid: int, slot: Vector2) -> None:
         self.group_id = gid
@@ -168,9 +243,13 @@ class Character:
     def update(
         self,
         dt: float,
-        neighbors: list[steering.Neighbor],
+        neighbors: list[Neighbor],
         platforms: list[Platform],
     ) -> None:
+        # Emotion is orthogonal to Mode (a character can be panicked while
+        # grouped or emoting), so tick it EVERY frame, before the mode branch.
+        self._update_emotion(dt, neighbors)
+
         # On the very first frame we know nothing about the level geometry, so
         # snap onto whatever surface is directly under the feet.
         if self.platform is None and self.velocity.y == 0:
@@ -188,10 +267,75 @@ class Character:
         self._update_clip()
         self._advance_anim(dt)
 
+    # --- emotion (L5) ---------------------------------------------------------
+
+    def _update_emotion(self, dt: float, neighbors: list[Neighbor]) -> None:
+        """Advance the continuous (valence, arousal) mood one frame.
+
+        Three sources, in order: (1) exponential decay toward neutral -- the
+        single most important legibility mechanic, and the reason decay must
+        outrun contagion or panic latches forever; (2) proximity-weighted
+        contagion pulling toward neighbours' mood, scaled by my susceptibility
+        and each sender's expressiveness (reuses the shared neighbour scan -- no
+        new spatial query); (3) a mild crowding bump to arousal. Clamp last.
+
+        Crowding uses the IN-RADIUS neighbour count, not ``len(neighbors)``: the
+        shared list is every character in the world, so ``len`` would bump arousal
+        from far-away strangers too.
+        """
+        decay = settings.EMOTION_DECAY_PER_SEC ** dt
+        self.arousal *= decay
+        self.valence *= decay
+
+        radius = settings.CONTAGION_RADIUS
+        tot_w = ar = va = 0.0
+        nearby = 0
+        for n in neighbors:
+            d = self.pos.distance_to(n.pos)
+            if d <= 0.0 or d > radius:  # d == 0 skips my own record in the list
+                continue
+            nearby += 1
+            w = (1.0 - d / radius) * n.expressiveness  # closer + louder = stronger
+            ar += w * n.arousal
+            va += w * n.valence
+            tot_w += w
+        if tot_w > 0.0:
+            # Clamp the step so a large dt can't overshoot past the neighbour mean.
+            rate = min(1.0, settings.CONTAGION_RATE * self.susceptibility * dt)
+            self.arousal += rate * (ar / tot_w - self.arousal)
+            self.valence += rate * (va / tot_w - self.valence)
+
+        self.arousal += settings.CROWD_AROUSAL * nearby * dt
+        self.arousal = max(0.0, min(1.0, self.arousal))
+        self.valence = max(-1.0, min(1.0, self.valence))
+
+    def emotion_face(self) -> str:
+        """Quantize the continuous mood to ``"default" | "battle" | "panic"`` with
+        hysteresis so the rendered face does not strobe on a boundary.
+
+        Each face uses looser EXIT thresholds while it is the current face than
+        the ENTER thresholds used to reach it, so a value dipping back across the
+        boundary holds the face instead of flickering. Priority panic > battle >
+        default. Mutating + idempotent: re-calling with the same mood is stable.
+        """
+        cur = self._emotion_face
+        v, a = self.valence, self.arousal
+        if cur == "panic":
+            panic = v < settings.PANIC_VALENCE_EXIT and a > settings.PANIC_AROUSAL_EXIT
+        else:
+            panic = v < settings.PANIC_VALENCE_ENTER and a > settings.PANIC_AROUSAL_ENTER
+        if cur == "battle":
+            battle = a > settings.BATTLE_AROUSAL_EXIT
+        else:
+            battle = a > settings.BATTLE_AROUSAL_ENTER
+        face = "panic" if panic else "battle" if battle else "default"
+        self._emotion_face = face
+        return face
+
     def _wander(
         self,
         dt: float,
-        neighbors: list[steering.Neighbor],
+        neighbors: list[Neighbor],
         platforms: list[Platform],
     ) -> None:
         grounded = self.platform is not None
@@ -205,8 +349,13 @@ class Character:
         # Restlessness scales the hop/idle cadence: a [0, RESTLESS_RATE_SPAN]
         # multiplier so the median character keeps ~the global rate while a calm
         # one barely fidgets and a restless one paces and pauses constantly --
-        # visible per-character variety even before any grouping logic.
+        # visible per-character variety even before any grouping logic. Arousal
+        # then layers on top: an agitated character hops more and pauses less
+        # (it paces instead of taking idle breaks), a calm one the reverse.
         rest_mult = settings.RESTLESS_RATE_SPAN * self.persona.restlessness
+        arousal_gain = 1.0 + settings.AROUSAL_RESTLESS_GAIN * self.arousal
+        jump_mult = rest_mult * arousal_gain
+        idle_mult = rest_mult / arousal_gain
 
         if grounded:
             if self._pause_timer > 0:
@@ -220,15 +369,16 @@ class Character:
                     )
             elif (
                 density < settings.CROWD_JUMP_DENSITY
-                and random.random() < settings.JUMP_CHANCE * rest_mult * dt
+                and random.random() < settings.JUMP_CHANCE * jump_mult * dt
             ):
                 self.velocity.y = -settings.JUMP_SPEED  # hop -> becomes airborne
                 self.platform = None
                 grounded = False
             else:
                 # Crowded characters pause more often (milling/hanging-out read);
-                # restlessness scales how often this character pauses at all.
-                idle_chance = settings.IDLE_CHANCE * rest_mult * (
+                # restlessness scales how often this character pauses at all,
+                # arousal suppresses it (agitated characters don't rest).
+                idle_chance = settings.IDLE_CHANCE * idle_mult * (
                     1.0 + density * settings.CROWD_IDLE_DENSITY_GAIN
                 )
                 if random.random() < idle_chance * dt:
@@ -250,9 +400,24 @@ class Character:
             settings.CROWD_MIN_SPEED_SCALE,
             1.0 - density * settings.CROWD_SLOWDOWN_PER_NEIGHBOR,
         )
-        desired_vx = 0.0 if pausing else self._wander_heading * speed_scale
+        # Emotion modulates voluntary movement: arousal speeds it up (and lifts
+        # the magnitude cap below so a panicked character actually outruns the
+        # resting WALK_SPEED), while distress (negative valence) damps it back
+        # down -- net effect: panicked = fast & erratic, sad = sluggish.
+        emo_speed = 1.0 + settings.AROUSAL_SPEED_GAIN * self.arousal
+        if self.valence < 0.0:
+            emo_speed *= max(0.0, 1.0 + settings.VALENCE_SPEED_DAMP * self.valence)
+        # Valence scales separation: distressed characters withdraw (want more
+        # space, the flight read), happy ones tolerate a tighter cluster.
+        sep_scale = max(0.0, 1.0 - settings.VALENCE_SEP_GAIN * self.valence)
+
+        desired_vx = (
+            0.0 if pausing else self._wander_heading * speed_scale * emo_speed
+        )
         crowd = (
-            settings.CROWD_SEP_WEIGHT * steering.separation_push(self.pos, neighbors)
+            settings.CROWD_SEP_WEIGHT
+            * sep_scale
+            * steering.separation_push(self.pos, neighbors)
             + settings.CROWD_COH_WEIGHT * steering.cohesion_pull(self.pos, neighbors)
             + settings.CROWD_ALI_WEIGHT * steering.alignment_nudge(self.pos, neighbors)
         )
@@ -262,9 +427,8 @@ class Character:
         self.velocity.x = steering.steer_toward(
             self.velocity.x, desired_vx, settings.MAX_FORCE * dt
         )
-        self.velocity.x = max(
-            -settings.MAX_SPEED, min(settings.MAX_SPEED, self.velocity.x)
-        )
+        max_speed = settings.MAX_SPEED * emo_speed
+        self.velocity.x = max(-max_speed, min(max_speed, self.velocity.x))
 
         # Vertical velocity: pinned to the surface while grounded, else gravity.
         if self.platform is not None:
@@ -396,7 +560,10 @@ class Character:
 
     @property
     def surface(self) -> pygame.Surface:
-        frames = self.sprites.clip(self.clip)
+        # Select the frame list by the quantized emotion face; the provider holds
+        # all three face variants per clip (and falls back to the resting face
+        # when an emotion variant is absent, e.g. placeholder art).
+        frames = self.sprites.clip(self.clip, self.emotion_face())
         return frames[int(self.frame_index) % len(frames)]
 
 

@@ -99,6 +99,44 @@ RESTLESS_RATE_SPAN = 2.0  # restlessness in [0,1] maps to a [0, SPAN] multiplier
 #                           JUMP_CHANCE / IDLE_CHANCE, so the median character keeps
 #                           ~the global rate while calm/restless ones visibly diverge
 
+# Emotion (L5): a continuous (valence, arousal) state per character, orthogonal
+# to the behaviour Mode, that drives the face and modulates movement. Updated
+# every frame from three sources -- exponential decay toward neutral, proximity-
+# weighted contagion from neighbours, and a mild crowding arousal bump -- then
+# quantized to the three existing faces with hysteresis. Conservative defaults:
+# the contagion lag and decay are what sell the effect, and decay MUST outrun
+# contagion at the crowd's resting state or panic latches forever. Tune by eye.
+EMOTION_DECAY_PER_SEC = 0.4  # fraction of an emotion value retained per second
+#                              (spiky/fast: ~40% survives each second toward neutral)
+CONTAGION_RATE = 0.6  # how fast I move toward my neighbours' mood per second
+CONTAGION_RADIUS = 2.5 * SPRITE_W  # px; only fairly close neighbours infect me
+AROUSAL_SPEED_GAIN = 0.8  # arousal=1 walks up to ~1.8x WALK_SPEED (and lifts the cap)
+CROWD_AROUSAL = 0.05  # arousal added per in-radius neighbour per second (crowd tension)
+VALENCE_SPEED_DAMP = 0.5  # distress (negative valence) damps speed: valence=-1 -> x0.5
+AROUSAL_RESTLESS_GAIN = 1.0  # arousal raises JUMP cadence / lowers IDLE cadence by this
+VALENCE_SEP_GAIN = 0.5  # valence scales separation: happy(+1) x0.5 (tighter),
+#                         distressed(-1) x1.5 (withdraw / want more space)
+EMOTION_TRAIT_MIN = 0.5  # seeded susceptibility/expressiveness map into [MIN, 1.0]
+
+# Face quantization hysteresis (dual enter/exit thresholds so faces don't strobe
+# when a value sits on a boundary). A face is harder to enter than to leave: the
+# EXIT thresholds are looser, so a face holds through small dips back across the
+# boundary. panic = distressed + agitated; battle = high arousal; else default.
+PANIC_VALENCE_ENTER = -0.35
+PANIC_VALENCE_EXIT = -0.20
+PANIC_AROUSAL_ENTER = 0.40
+PANIC_AROUSAL_EXIT = 0.25
+BATTLE_AROUSAL_ENTER = 0.50
+BATTLE_AROUSAL_EXIT = 0.35
+
+# Command-driven emotion impulses (an OCC-style appraised event: an instantaneous
+# clamped nudge to the target's valence/arousal). !hug also keeps its EMOTING clip.
+HUG_VALENCE_IMPULSE = 0.4
+PANIC_AROUSAL_IMPULSE = 0.8
+PANIC_VALENCE_IMPULSE = -0.7
+CHEER_AROUSAL_IMPULSE = 0.5
+CHEER_VALENCE_IMPULSE = 0.6
+
 # Animation
 ANIM_FPS = 8.0  # clip playback rate (independent of render FPS)
 HUG_DURATION = 1.2  # seconds

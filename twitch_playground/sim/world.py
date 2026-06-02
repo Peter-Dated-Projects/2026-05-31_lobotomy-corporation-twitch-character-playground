@@ -15,8 +15,8 @@ from pygame.math import Vector2
 from twitch_playground import settings
 from twitch_playground.assets.provider import AssetProvider
 from twitch_playground.chat.commands import ChatCommand, normalize_target
-from twitch_playground.sim import personality, steering
-from twitch_playground.sim.character import Character, Mode
+from twitch_playground.sim import personality
+from twitch_playground.sim.character import Character, Mode, Neighbor
 from twitch_playground.sim.personality import personality_for
 from twitch_playground.sim.platforms import default_level
 
@@ -41,6 +41,8 @@ class World:
             "hug": self._cmd_hug,
             "follow": self._cmd_follow,
             "leave": self._cmd_leave,
+            "panic": self._cmd_panic,
+            "cheer": self._cmd_cheer,
         }.get(cmd.cmd)
         if handler:
             handler(cmd)
@@ -85,6 +87,31 @@ class World:
         if char is not None:
             char.hold_autonomy()  # do not auto-rejoin right after a manual leave
             self._remove_from_group(cmd.author)
+
+    def _cmd_panic(self, cmd: ChatCommand) -> None:
+        char = self._emotion_target(cmd)
+        if char is not None:
+            char.apply_emotion(
+                d_valence=settings.PANIC_VALENCE_IMPULSE,
+                d_arousal=settings.PANIC_AROUSAL_IMPULSE,
+            )
+            char.touch()
+
+    def _cmd_cheer(self, cmd: ChatCommand) -> None:
+        char = self._emotion_target(cmd)
+        if char is not None:
+            char.apply_emotion(
+                d_valence=settings.CHEER_VALENCE_IMPULSE,
+                d_arousal=settings.CHEER_AROUSAL_IMPULSE,
+            )
+            char.touch()
+
+    def _emotion_target(self, cmd: ChatCommand) -> Character | None:
+        """Resolve an emotion command's target: an explicit ``@name`` argument if
+        given, else the command's own author. Contagion then ripples the impulse
+        out to that character's neighbours over the next frames."""
+        name = normalize_target(cmd.args[0]) if cmd.args else cmd.author
+        return self.characters.get(name)
 
     # --- spawning / despawning ------------------------------------------------
 
@@ -186,11 +213,19 @@ class World:
 
     def update(self, dt: float) -> None:
         # Build the shared neighbour records ONCE per frame -- a frame-start
-        # snapshot (pos copied, plus heading) handed to every character so all
-        # steering rules read one consistent list rather than re-scanning. Later
-        # behaviour layers widen this record (emotion); the build stays single.
+        # snapshot (pos copied, plus heading and emotion) handed to every
+        # character so all steering rules AND emotional contagion read one
+        # consistent list rather than each re-scanning. This single record now
+        # carries the L5 emotion fields too, so contagion adds no new query.
         neighbors = [
-            steering.Neighbor(Vector2(c.pos), c.facing, c.velocity.x)
+            Neighbor(
+                Vector2(c.pos),
+                c.facing,
+                c.velocity.x,
+                c.arousal,
+                c.valence,
+                c.expressiveness,
+            )
             for c in self.characters.values()
         ]
         for char in self.characters.values():

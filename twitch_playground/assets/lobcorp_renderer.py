@@ -221,18 +221,33 @@ class LobCorpProvider:
         return CHARACTER_DEFS.get(assigned) or CHARACTER_DEFS[DEFAULT_CHARACTER_ID]
 
     def _build(self, char_def: CharacterDef) -> SpriteSet:
-        """Composite the four required clips per the animation-clips table.
+        """Composite every clip at all three emotion faces (L5).
 
-        All clips render at the resting "default" emotion -- runtime emotion
-        switching is a future feature; compose_character already supports it.
+        ``compose_character`` selects the face layers by ``emotion``, so we run
+        the clip build once per face and key the results into ``emotion_frames``.
+        Pre-rendering keeps the hot path a dict lookup + blit (no per-frame
+        compositing) at the cost of ~3x face memory -- fine at our scale. The
+        "default" variant doubles as ``SpriteSet.frames`` so the resting clips are
+        still reachable without an emotion key.
         """
-        base = compose_character(char_def, "default", 0, self._sheets)
+        emotion_frames = {
+            emotion: self._build_clips(char_def, emotion)
+            for emotion in ("default", "battle", "panic")
+        }
+        return SpriteSet(emotion_frames["default"], emotion_frames)
+
+    def _build_clips(
+        self, char_def: CharacterDef, emotion: str
+    ) -> dict[str, list[pygame.Surface]]:
+        """Composite the four required clips for one emotion face per the
+        animation-clips table."""
+        base = compose_character(char_def, emotion, 0, self._sheets)
 
         # idle: hold frame 0, with a 1px upward breathing bob on the off-beat.
         idle = [base, _bob(base, -1)]
         # walk: the 8 limb-animation frames (frame 0 reuses the base composite).
         walk = [base] + [
-            compose_character(char_def, "default", i, self._sheets) for i in range(1, 8)
+            compose_character(char_def, emotion, i, self._sheets) for i in range(1, 8)
         ]
         # jump: a stretched airborne pose (narrower + taller), held near-static.
         jump = [_scaled(base, 0.85, 1.2), _scaled(base, 0.80, 1.3)]
@@ -241,7 +256,7 @@ class LobCorpProvider:
         # 1.0 -> 1.2 -> 1.4 -> 1.2).
         hug = [_scaled(base, sx, 1.0) for sx in (1.0, 1.2, 1.4, 1.2)]
 
-        return SpriteSet({"idle": idle, "walk": walk, "jump": jump, "hug": hug})
+        return {"idle": idle, "walk": walk, "jump": jump, "hug": hug}
 
     def _warn(self, character_id: str, exc: Exception) -> None:
         if not self._warned:

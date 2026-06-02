@@ -8,7 +8,7 @@ instantiated AFTER pygame.display.set_mode().
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Protocol
 
 import pygame
@@ -21,12 +21,24 @@ class SpriteSet:
     """Animation frames for one character type, keyed by clip name.
 
     Required clips: "idle", "walk", "jump", "hug".
+
+    ``frames`` holds the resting "default"-emotion clips. ``emotion_frames`` is an
+    optional second index ``emotion_frames[emotion][clip]`` carrying the L5 face
+    variants ("default"/"battle"/"panic"); a provider that pre-renders all three
+    fills it. When it is empty (or a requested emotion key is missing) ``clip``
+    falls back to ``frames``, so a placeholder SpriteSet built with default art
+    only still serves every emotion -- the graceful-fallback contract.
     """
 
     frames: dict[str, list[pygame.Surface]]
+    emotion_frames: dict[str, dict[str, list[pygame.Surface]]] = field(
+        default_factory=dict
+    )
 
-    def clip(self, name: str) -> list[pygame.Surface]:
-        return self.frames.get(name) or self.frames["idle"]
+    def clip(self, name: str, emotion: str = "default") -> list[pygame.Surface]:
+        variants = self.emotion_frames.get(emotion)
+        src = variants if variants is not None else self.frames
+        return src.get(name) or src["idle"]
 
 
 class AssetProvider(Protocol):
