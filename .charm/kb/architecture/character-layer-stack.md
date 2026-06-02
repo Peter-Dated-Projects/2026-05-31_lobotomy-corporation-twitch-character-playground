@@ -31,23 +31,34 @@ Every character is assembled per-frame by blitting sprites in this order onto a 
 | 11 | Glasses | optional overlay | character def |
 | 12 | Weapon | side-offset sprite | character def |
 
-## Anchor offsets (relative to canvas center, y up = negative)
+## Compositing space (4x work canvas + per-layer scale)
+
+The parts share no coordinate system (head ~193px wide, torso ~66px, mouth
+~11px in native px), so compositing happens at 4x on a `WORK_W x WORK_H`
+(128x160) canvas: each layer is first scaled by `settings.LAYER_SCALES[layer]`
+(a multiplier on its native size), placed at the work-center plus its
+`LAYER_OFFSETS` entry, then the finished composite is `smoothscale`d down to
+(SPRITE_W, SPRITE_H). See decision 0003 for the rationale. Both dicts are
+tunable constants in settings.py — do not hardcode inline.
+
+Calibrated values for Standard Agent (work-canvas px; this is the global
+template, which renders all 10 believably — see the layer-scale-template
+gotcha):
 
 ```
-rear_hair:    (0,   0)
-body limbs:   (0, +10)
-clothes limbs:(0, +10)
-body torso:   (0,   0)
-clothes torso:(0,   0)
-head:         (0, -30)
-front_hair:   (0, -50)
-eyebrows:     (0, -42)
-eyes:         (0, -28)
-mouth:        (0, -10)
-weapon:       (+20, +5)
+layer          scale   offset(dx,dy)
+rear_hair      0.26    (0,  -34)
+body_limbs     1.7     (0,  +44)
+clothes_limbs  1.05    (0,  +44)
+body_torso     1.05    (0,  +24)
+clothes_torso  0.74    (0,  +26)
+head           0.30    (0,  -26)
+front_hair     0.27    (0,  -40)
+eyebrows       0.9     (0,  -31)
+eyes           0.9     (0,  -24)
+mouth          0.95    (0,  -11)
+weapon         0.4     (+34, +18)
 ```
-
-These are tunable constants — do not hardcode inline.
 
 ## Emotion states
 

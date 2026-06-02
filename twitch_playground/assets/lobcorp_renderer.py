@@ -49,8 +49,35 @@ def _canvas() -> pygame.Surface:
     return pygame.Surface((settings.SPRITE_W, settings.SPRITE_H), pygame.SRCALPHA).convert_alpha()
 
 
+def _work_canvas() -> pygame.Surface:
+    """A fresh transparent 4x working canvas parts are composited onto.
+
+    Parts are scaled and placed here (where they have room), then the finished
+    composite is downscaled to a character-sized canvas as the last step.
+    """
+    return pygame.Surface((settings.WORK_W, settings.WORK_H), pygame.SRCALPHA).convert_alpha()
+
+
 def _center() -> tuple[int, int]:
     return settings.SPRITE_W // 2, settings.SPRITE_H // 2
+
+
+def _work_center() -> tuple[int, int]:
+    return settings.WORK_W // 2, settings.WORK_H // 2
+
+
+def _scale_part(surf: pygame.Surface, factor: float) -> pygame.Surface:
+    """Scale a native part by `factor` for placement on the work canvas.
+
+    smoothscale gives a far cleaner result than nearest-neighbour when shrinking
+    the large (100-275px) native crops down to work-canvas size, and preserves
+    per-pixel alpha in pygame-ce.
+    """
+    if factor == 1.0:
+        return surf
+    w = max(1, round(surf.get_width() * factor))
+    h = max(1, round(surf.get_height() * factor))
+    return pygame.transform.smoothscale(surf, (w, h))
 
 
 def _face(layers: dict[str, CharacterLayer], emotion: str) -> CharacterLayer:
@@ -80,12 +107,13 @@ def compose_character(
     Raises whatever the sprite cache raises (missing sheet, out-of-range
     variant); the caller is responsible for the graceful-fallback policy.
     """
-    canvas = _canvas()
-    cx, cy = _center()
+    canvas = _work_canvas()
+    cx, cy = _work_center()
 
     def place(surf: pygame.Surface, offset_key: str) -> None:
+        scaled = _scale_part(surf, settings.LAYER_SCALES.get(offset_key, 1.0))
         dx, dy = settings.LAYER_OFFSETS.get(offset_key, (0, 0))
-        canvas.blit(surf, surf.get_rect(center=(cx + dx, cy + dy)))
+        canvas.blit(scaled, scaled.get_rect(center=(cx + dx, cy + dy)))
 
     limb_frame = anim_frame % cache.variant_count(SKELETON2_SHEET)
     clothes_limb = CLOTHES_LIMB_BASE + (anim_frame % CLOTHES_LIMB_FRAMES)
@@ -118,7 +146,10 @@ def compose_character(
     if char_def.weapon is not None:
         place(cache.get(char_def.weapon.file, char_def.weapon.variant), "weapon")
 
-    return canvas
+    # Downscale the finished 4x composite to the canonical clip-frame size.
+    # smoothscale antialiases the shrink so the dense face features survive
+    # legibly at 32x40 instead of aliasing into noise.
+    return pygame.transform.smoothscale(canvas, (settings.SPRITE_W, settings.SPRITE_H))
 
 
 def _recenter(surf: pygame.Surface) -> pygame.Surface:

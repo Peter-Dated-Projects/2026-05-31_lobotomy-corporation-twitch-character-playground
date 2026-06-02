@@ -71,19 +71,50 @@ CLOTHES_DIR = os.path.join(ASSETS_ROOT, "Employee Clothes and Weapons")
 # extracted blobs into reading order.
 SHEET_ROW_TOLERANCE = 60
 
-# Per-layer anchor offset (dx, dy) relative to the canvas center, applied when
-# compositing a character. y grows downward, so negative dy lifts a layer up.
+# --- Compositing coordinate system ------------------------------------------
+# The raw extracted parts share NO coordinate system: a character's head crop is
+# ~193px wide, its torso ~66px, its eyes ~23px (measured on Standard Agent's real
+# sheets). Blitting them at native size onto the 32x40 sprite canvas just
+# overflows into a blob. So we composite at 4x on a larger WORKING canvas, where
+# each layer is first scaled by its own LAYER_SCALES factor into a shared space,
+# then downscale the finished composite to (SPRITE_W, SPRITE_H) -- the size every
+# clip frame must be. y grows downward throughout; offsets below are in
+# working-canvas pixels relative to its center.
+WORK_W = SPRITE_W * 4  # 128
+WORK_H = SPRITE_H * 4  # 160
+
+# Per-layer scale: a multiplier on each part's NATIVE extracted size, chosen so
+# the disparate-resolution parts land in one believable proportion on the work
+# canvas. Calibrated visually for "Standard Agent" (the proof character); the
+# other named characters reuse these and may need bespoke tuning later. A layer
+# missing from the dict scales 1:1. Tunable -- never hardcode inline.
+LAYER_SCALES = {
+    "rear_hair": 0.26,
+    "body_limbs": 1.7,
+    "clothes_limbs": 1.05,
+    "body_torso": 1.05,
+    "clothes_torso": 0.74,
+    "head": 0.30,
+    "front_hair": 0.27,
+    "eyebrows": 0.9,
+    "eyes": 0.9,
+    "mouth": 0.95,
+    "weapon": 0.4,
+}
+
+# Per-layer anchor offset (dx, dy) relative to the WORK canvas center, applied
+# after a layer is scaled. y grows downward, so a negative dy lifts a layer up.
 # Tunable -- never hardcode these inline in the renderer.
 LAYER_OFFSETS = {
-    "rear_hair": (0, 0),
-    "body_limbs": (0, 10),
-    "clothes_limbs": (0, 10),
-    "body_torso": (0, 0),
-    "clothes_torso": (0, 0),
-    "head": (0, -30),
-    "front_hair": (0, -50),
-    "eyebrows": (0, -42),
-    "eyes": (0, -28),
-    "mouth": (0, -10),
-    "weapon": (20, 5),
+    "rear_hair": (0, -34),
+    "body_limbs": (0, 44),
+    "clothes_limbs": (0, 44),
+    "body_torso": (0, 24),
+    "clothes_torso": (0, 26),
+    "head": (0, -26),
+    "front_hair": (0, -40),
+    "eyebrows": (0, -31),
+    "eyes": (0, -24),
+    "mouth": (0, -11),
+    "weapon": (34, 18),
 }
