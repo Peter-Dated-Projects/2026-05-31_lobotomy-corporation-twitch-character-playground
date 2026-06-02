@@ -14,15 +14,36 @@ Keys:
 
 from __future__ import annotations
 
+import os
 import queue
 import random
 from typing import Callable
 
 import pygame
 
+from twitch_playground import settings
+from twitch_playground.assets.lobcorp_renderer import LobCorpProvider
+from twitch_playground.assets.provider import AssetProvider, PlaceholderProvider
 from twitch_playground.chat.commands import ChatCommand
 
 HELP = "[dev] J=join  H=hug  F=follow  L=leave  `=toggle HUD"
+
+
+def make_provider() -> AssetProvider:
+    """Pick the asset provider for this run.
+
+    Real LobCorp art is loaded when the asset drop is present on disk; otherwise
+    we fall back to procedural placeholder sprites so the app runs anywhere
+    without the (un-checked-in) sheets. LobCorpProvider degrades per-character
+    on its own too, so a partial/corrupt drop still won't crash the app.
+
+    Must be called after pygame.display.set_mode() -- providers build surfaces
+    with convert_alpha(), which needs an active video mode.
+    """
+    if os.path.isdir(settings.ASSETS_ROOT):
+        return LobCorpProvider()
+    print(f"[dev] LobCorp asset drop not found at {settings.ASSETS_ROOT!r}; using placeholder sprites")
+    return PlaceholderProvider()
 
 
 class DevInjector:

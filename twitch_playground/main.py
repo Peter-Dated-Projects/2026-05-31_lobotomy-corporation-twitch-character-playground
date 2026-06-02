@@ -15,10 +15,9 @@ import pygame
 from dotenv import load_dotenv
 
 from twitch_playground import settings
-from twitch_playground.assets.provider import PlaceholderProvider
 from twitch_playground.chat.bot import start_chat_thread
 from twitch_playground.chat.commands import ChatCommand
-from twitch_playground.dev import HELP, DevInjector
+from twitch_playground.dev import HELP, DevInjector, make_provider
 from twitch_playground.render import hud, scene
 from twitch_playground.sim.world import World
 
@@ -32,7 +31,7 @@ def main() -> None:
     clock = pygame.time.Clock()
 
     # provider must be built after the display exists (convert_alpha needs it)
-    world = World(PlaceholderProvider())
+    world = World(make_provider())
     command_queue: "queue.Queue[ChatCommand]" = queue.Queue()
 
     if start_chat_thread(command_queue) is not None:
