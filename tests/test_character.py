@@ -63,8 +63,11 @@ def test_clip_is_jump_while_airborne(make_char, calm):
 
 def test_clip_is_walk_while_strolling_on_a_surface(make_char, calm):
     level = default_level()
-    char = make_char(x=50.0)
-    char.update(1 / 60, [], level)
+    char = make_char(x=480.0)
+    # Velocity now eases up over a few frames instead of snapping to full speed,
+    # so give it time to cross WALK_THRESHOLD before asserting the walk clip.
+    for _ in range(15):
+        char.update(1 / 60, [], level)
     assert char.platform is not None
     assert abs(char.velocity.x) > settings.WALK_THRESHOLD
     assert char.clip == "walk"
@@ -72,13 +75,68 @@ def test_clip_is_walk_while_strolling_on_a_surface(make_char, calm):
 
 def test_clip_is_idle_while_paused_on_a_surface(make_char, calm):
     level = default_level()
-    char = make_char(x=50.0)
+    char = make_char(x=480.0)
     char.update(1 / 60, [], level)  # bind + start strolling
     char._pause_timer = 5.0  # force an idle pause
-    char.update(1 / 60, [], level)
+    # While paused the desired velocity is 0; easing brings velocity.x to a true
+    # zero within a few frames (steer_toward lands exactly when within the cap).
+    for _ in range(30):
+        char.update(1 / 60, [], level)
     assert char.platform is not None
     assert char.velocity.x == 0.0
     assert char.clip == "idle"
+
+
+def test_velocity_eases_rather_than_snapping(make_char, calm, monkeypatch):
+    # Freeze the wander heading so the test drives a fixed desired velocity.
+    monkeypatch.setattr(settings, "WANDER_DISPLACE", 0.0)
+    monkeypatch.setattr(settings, "WANDER_REORIENT_CHANCE", 0.0)
+    level = default_level()
+    char = make_char(x=480.0)
+    char.update(1 / 60, [], level)  # bind to the ground
+    char.velocity.x = 0.0
+    char._wander_heading = settings.WALK_SPEED  # want full-speed rightward stroll
+
+    char.update(1 / 60, [], level)
+    # A single frame must NOT teleport to full speed -- it eases toward it.
+    assert 0.0 < char.velocity.x < settings.WALK_SPEED
+    after_one = char.velocity.x
+
+    for _ in range(30):
+        char.update(1 / 60, [], level)
+    # Given time it ramps up, and never exceeds the MAX_SPEED magnitude cap.
+    assert char.velocity.x > after_one
+    assert abs(char.velocity.x) <= settings.MAX_SPEED
+
+
+def test_facing_follows_velocity_with_deadzone(make_char, calm, monkeypatch):
+    monkeypatch.setattr(settings, "WANDER_DISPLACE", 0.0)
+    monkeypatch.setattr(settings, "WANDER_REORIENT_CHANCE", 0.0)
+    level = default_level()
+    char = make_char(x=480.0)
+    char.update(1 / 60, [], level)
+
+    # A clear rightward stroll commits facing right.
+    char._wander_heading = settings.WALK_SPEED
+    for _ in range(20):
+        char.update(1 / 60, [], level)
+    assert char.velocity.x > settings.WALK_THRESHOLD
+    assert char.facing == 1
+
+    # A clear leftward heading flips facing left.
+    char._wander_heading = -settings.WALK_SPEED
+    for _ in range(20):
+        char.update(1 / 60, [], level)
+    assert char.velocity.x < -settings.WALK_THRESHOLD
+    assert char.facing == -1
+
+    # Easing to a near-idle stop keeps velocity below the deadzone, so facing
+    # must HOLD its last value rather than strobe.
+    char._wander_heading = 0.0
+    for _ in range(20):
+        char.update(1 / 60, [], level)
+    assert abs(char.velocity.x) <= settings.WALK_THRESHOLD
+    assert char.facing == -1
 
 
 def test_emoting_plays_hug_then_reverts(make_char, calm):

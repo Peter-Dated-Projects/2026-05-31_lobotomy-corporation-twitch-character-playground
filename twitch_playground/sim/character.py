@@ -63,10 +63,22 @@ class Character:
         self.frame_index = 0.0
         self.emote_timer = 0.0
 
-        self._facing = random.choice((-1, 1))  # horizontal stroll direction
+        self._facing = random.choice((-1, 1))  # last committed facing (-1 / 1)
+        # Persistent wander heading: a signed desired speed (px/s) that drifts
+        # coherently each frame, replacing the old random.choice direction flip.
+        # Start strolling at full speed in the initial facing direction.
+        self._wander_heading = self._facing * settings.WALK_SPEED
         self._pause_timer = 0.0  # > 0 while taking an idle pause
 
         self.last_interaction = time.monotonic()
+
+    @property
+    def facing(self) -> int:
+        """Horizontal facing for the renderer: ``1`` faces right (the unflipped
+        sheet pose), ``-1`` faces left. Read-only; updated from velocity with a
+        WALK_THRESHOLD deadzone so a near-idle character does not strobe. See
+        docs/design/sidescroller-contract.md (Sim exposes it, render consumes)."""
+        return self._facing
 
     # --- lifecycle / commands -------------------------------------------------
 
@@ -137,7 +149,11 @@ class Character:
                 self._pause_timer -= dt
                 pausing = self._pause_timer > 0
                 if not pausing:
-                    self._facing = random.choice((-1, 1))  # head off afresh
+                    # Coming out of a pause: pick a fresh meander direction by
+                    # reorienting the heading (still eased into, never snapped).
+                    self._wander_heading = (
+                        random.uniform(-1.0, 1.0) * settings.WALK_SPEED
+                    )
             elif random.random() < settings.JUMP_CHANCE * dt:
                 self.velocity.y = -settings.JUMP_SPEED  # hop -> becomes airborne
                 self.platform = None
@@ -148,9 +164,21 @@ class Character:
                 )
                 pausing = True
 
-        # Horizontal velocity: stroll unless paused, plus a separation nudge.
-        walk = 0.0 if pausing else self._facing * settings.WALK_SPEED
-        self.velocity.x = walk + steering.separation_push(self.pos, neighbor_positions)
+        # Drift the wander heading coherently while actively strolling.
+        if grounded and not pausing:
+            self._wander_heading = steering.wander_heading(self._wander_heading, dt)
+
+        # Desired horizontal velocity = wander heading (0 while paused) plus a
+        # separation nudge; ease the actual velocity toward it with a capped
+        # steering force instead of snapping, then clamp to MAX_SPEED.
+        desired_vx = 0.0 if pausing else self._wander_heading
+        desired_vx += steering.separation_push(self.pos, neighbor_positions)
+        self.velocity.x = steering.steer_toward(
+            self.velocity.x, desired_vx, settings.MAX_FORCE * dt
+        )
+        self.velocity.x = max(
+            -settings.MAX_SPEED, min(settings.MAX_SPEED, self.velocity.x)
+        )
 
         # Vertical velocity: pinned to the surface while grounded, else gravity.
         if self.platform is not None:
@@ -161,6 +189,7 @@ class Character:
         prev_feet_y = self.pos.y
         self.pos += self.velocity * dt
         self._apply_horizontal_bounds()
+        self._update_facing()
 
         # Landing: only while airborne and descending can we catch a surface.
         if self.platform is None:
@@ -182,14 +211,27 @@ class Character:
         if self.platform is not None:
             low = max(low, self.platform.left)
             high = min(high, self.platform.right)
+        # Turn the *heading* around at the edge (so the eased velocity follows
+        # it back inward) rather than hard-rerolling facing. A zero heading is
+        # bumped to full WALK_SPEED so a character cannot stall against a wall.
+        speed = abs(self._wander_heading) or settings.WALK_SPEED
         if self.pos.x < low:
             self.pos.x = low
-            self._facing = 1
+            self._wander_heading = speed
             self.velocity.x = abs(self.velocity.x)
         elif self.pos.x > high:
             self.pos.x = high
-            self._facing = -1
+            self._wander_heading = -speed
             self.velocity.x = -abs(self.velocity.x)
+
+    def _update_facing(self) -> None:
+        """Commit a new facing only when moving faster than WALK_THRESHOLD.
+
+        The deadzone is the hysteresis that stops a near-idle character (nudged
+        only by ``separation_push``) from flickering left/right: below the
+        threshold the previous facing is held."""
+        if abs(self.velocity.x) > settings.WALK_THRESHOLD:
+            self._facing = 1 if self.velocity.x > 0 else -1
 
     def _move_toward_slot(self, dt: float, platforms: list[Platform]) -> None:
         if self.group_slot is None:
@@ -203,18 +245,32 @@ class Character:
             self.velocity = Vector2(0, 0)
             self.pos = Vector2(self.group_slot)
             return
-        self.velocity = to_slot.normalize() * settings.WALK_SPEED
+        # Arrive: full speed until within GROUP_SLOW_RADIUS, then scale the
+        # desired speed down linearly with distance so the follower decelerates
+        # into the slot instead of running flat-out then snapping. The
+        # GROUP_ARRIVE_RADIUS check above is the final settle.
+        speed = settings.WALK_SPEED
+        if dist < settings.GROUP_SLOW_RADIUS:
+            speed *= dist / settings.GROUP_SLOW_RADIUS
+        desired = to_slot.normalize() * speed
+        # Ease both axes toward the desired velocity (capped force), matching the
+        # wander easing so grouped motion has the same weight.
+        max_delta = settings.MAX_FORCE * dt
+        self.velocity.x = steering.steer_toward(self.velocity.x, desired.x, max_delta)
+        self.velocity.y = steering.steer_toward(self.velocity.y, desired.y, max_delta)
         step = self.velocity * dt
         if step.length() >= dist:  # don't overshoot the slot
             self.pos = Vector2(self.group_slot)
             self.velocity = Vector2(0, 0)
         else:
             self.pos += step
+        self._update_facing()
 
     def _update_emoting(self, dt: float, platforms: list[Platform]) -> None:
         # Stationary while emoting: ease any horizontal motion to a stop. If we
-        # were hugged mid-hop, keep falling so we settle onto a surface.
-        self.velocity.x *= 0.6
+        # were hugged mid-hop, keep falling so we settle onto a surface. The
+        # decay is dt-based so it is identical at any frame rate.
+        self.velocity.x *= settings.EMOTE_DECAY_PER_SEC ** dt
         if self.platform is None:
             self.velocity.y += settings.GRAVITY * dt
             prev_feet_y = self.pos.y

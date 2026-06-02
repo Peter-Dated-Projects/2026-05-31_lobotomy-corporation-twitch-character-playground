@@ -15,10 +15,19 @@ SPRITE_W = 32
 SPRITE_H = 40
 
 # Movement (px/sec, since we integrate with delta-time)
-MAX_SPEED = 70.0
+MAX_SPEED = 70.0  # hard cap on horizontal velocity magnitude (slightly above
+#                   WALK_SPEED so a separation nudge can briefly add on top)
 WALK_THRESHOLD = 8.0  # speed below which a wandering character is "idle"
 GROUP_SLOT_SPACING = SPRITE_W + 10
 GROUP_ARRIVE_RADIUS = 4.0  # distance to a group slot below which we stop
+GROUP_SLOW_RADIUS = 28.0  # arrive: inside this radius desired speed scales
+#                           linearly to 0 before the GROUP_ARRIVE_RADIUS snap
+
+# Acceleration easing. Velocity eases toward a desired value with a capped
+# steering force (Reynolds: steering = desired - current, clamped to MAX_FORCE)
+# instead of snapping, so starts and stops read as weight. Tuned so a character
+# ramps from rest to WALK_SPEED in ~0.25s (a few frames at the 12fps render).
+MAX_FORCE = 240.0  # px/s^2; cap on how sharply horizontal velocity can change
 
 # Sidescroller physics (px, px/s, px/s^2). Smaller y is higher on screen, so a
 # jump is a negative y velocity and gravity is positive.
@@ -36,6 +45,13 @@ IDLE_CHANCE = 0.30  # idle-pause starts per second while grounded
 IDLE_PAUSE_MIN = 0.6
 IDLE_PAUSE_MAX = 1.8
 
+# Coherent 1-D wander: a persistent heading (signed desired speed) that drifts a
+# little each frame instead of being re-rolled with random.choice. The small
+# per-frame drift keeps meandering coherent (long-term wander, short-term
+# stability); the occasional reorientation lets a character change its mind.
+WANDER_DISPLACE = 90.0  # px/s of heading drift per second (random-walk magnitude)
+WANDER_REORIENT_CHANCE = 0.5  # per-second chance of a larger heading reorientation
+
 # Horizontal separation so characters sharing a surface do not fully overlap.
 # Purely horizontal: only neighbours at a similar height (same surface) push.
 HSEP_RADIUS = 30.0  # px; only neighbours closer than this nudge us apart
@@ -45,6 +61,11 @@ HSEP_PUSH = 40.0  # px/s; max horizontal nudge applied
 # Animation
 ANIM_FPS = 8.0  # clip playback rate (independent of render FPS)
 HUG_DURATION = 1.2  # seconds
+# Per-second multiplier easing residual horizontal motion to a stop while
+# EMOTING (was a frame-rate-dependent ``*= 0.6`` per frame). Applied as
+# ``velocity.x *= EMOTE_DECAY_PER_SEC ** dt`` so the decay is identical at any
+# frame rate; ~0.0022 reproduces the old 0.6/frame feel at the 12fps render.
+EMOTE_DECAY_PER_SEC = 0.0022
 
 # Lifecycle
 IDLE_TIMEOUT = 300.0  # seconds before an untouched character despawns

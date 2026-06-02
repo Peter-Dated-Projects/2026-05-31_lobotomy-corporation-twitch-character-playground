@@ -25,8 +25,14 @@ def draw(screen: pygame.Surface, world: World) -> None:
     # back-to-front: characters lower on screen (larger feet-y) overlap those behind
     for char in sorted(world.characters.values(), key=lambda c: c.pos.y):
         cx, cy = int(char.pos.x), int(char.pos.y)
-        rect = char.surface.get_rect(midbottom=(cx, cy))  # feet anchored at pos
-        screen.blit(char.surface, rect)
+        # The sheet pose faces right (facing == 1); flip horizontally to face
+        # left. char.facing carries a WALK_THRESHOLD deadzone, so a near-idle
+        # character does not flicker between flipped and unflipped.
+        surf = char.surface
+        if char.facing < 0:
+            surf = pygame.transform.flip(surf, True, False)
+        rect = surf.get_rect(midbottom=(cx, cy))  # feet anchored at pos
+        screen.blit(surf, rect)
         plate_rect = char.nameplate.get_rect(midbottom=(cx, rect.top - 2))
         screen.blit(char.nameplate, plate_rect)
 

@@ -54,6 +54,7 @@ class Character:
     group_slot: Vector2 | None
     platform: Platform | None     # surface currently standing on (None if airborne)
     clip: str                     # current animation clip name
+    facing: int                   # read-only: 1 faces right, -1 faces left
     last_interaction: float
     # methods:
     def touch(self)
@@ -73,6 +74,12 @@ Behavior:
   the previous mode. Stationary while emoting.
 - **clip selection**: `"hug"` when EMOTING; `"jump"` when airborne; `"walk"`
   when moving horizontally on a surface; else `"idle"`.
+- **facing / sprite flip** (cross-track): the Sim exposes `Character.facing`
+  (`1` = right, `-1` = left), committed from `velocity.x` with a
+  `WALK_THRESHOLD` deadzone so a near-idle character does not strobe. The sheet
+  pose faces **right** (`facing == 1` is unflipped); the renderer
+  (`render/scene.py`, World track) draws `pygame.transform.flip(surface, True,
+  False)` when `facing < 0`. Sim owns the value; render consumes it.
 
 ## SpriteSet clips (owned by Sim-engine ticket, in assets/provider.py)
 
