@@ -52,6 +52,28 @@ def test_spawn_requests_each_viewers_own_character_id(provider):
     assert recorder.requested == usernames
 
 
+def test_join_rejected_when_org_full(provider, monkeypatch, no_autonomy):
+    """At the MAX_CHARACTERS hard cap a new viewer's !join is turned away with the
+    'Organization not hiring.' notice and NO character is spawned -- the cap
+    rejects the applicant rather than evicting a current employee. An existing
+    character re-joining is unaffected by the cap."""
+    monkeypatch.setattr(settings, "MAX_CHARACTERS", 2)
+    world = World(provider)
+
+    assert world.handle_command(ChatCommand(cmd="join", author="a")) is None
+    assert world.handle_command(ChatCommand(cmd="join", author="b")) is None
+    assert len(world.characters) == 2
+
+    msg = world.handle_command(ChatCommand(cmd="join", author="c"))
+    assert msg == "Organization not hiring."
+    assert "c" not in world.characters
+    assert len(world.characters) == 2  # roster unchanged; nobody evicted
+
+    # an already-employed viewer re-joining still works at the cap
+    assert world.handle_command(ChatCommand(cmd="join", author="a")) is None
+    assert len(world.characters) == 2
+
+
 def test_update_builds_records_once_and_hands_a_grid_candidate_slice(provider, monkeypatch):
     """World.update builds the neighbour records ONCE per frame (a frame-start
     (pos, facing, vx) snapshot decoupled from the live characters) and hands each

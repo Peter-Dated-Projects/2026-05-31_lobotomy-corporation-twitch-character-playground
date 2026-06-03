@@ -57,6 +57,10 @@ def main() -> None:
     recent_commands: "deque[ChatCommand]" = deque(maxlen=hud.LOG_MAXLEN)
     hud_visible = True
 
+    # transient on-screen notice (text, monotonic expiry) raised by a command
+    # response -- e.g. the full-org "Organization not hiring." join denial
+    notice: "tuple[str, float] | None" = None
+
     running = True
     while running:
         dt = clock.tick(settings.FPS) / 1000.0
@@ -82,7 +86,9 @@ def main() -> None:
             except queue.Empty:
                 break
             recent_commands.append(cmd)
-            world.handle_command(cmd)
+            response = world.handle_command(cmd)
+            if response:
+                notice = (response, time.monotonic() + hud.NOTICE_DURATION)
 
         world.update(dt)
         world.tick_despawn(time.monotonic())
@@ -91,6 +97,15 @@ def main() -> None:
         scene.draw(stage, world)
         if hud_visible:
             hud.draw(stage, world, recent_commands)
+
+        # transient notice (e.g. full-org denial): drawn regardless of the debug
+        # HUD toggle since it is viewer-facing; clears itself when it expires
+        if notice is not None:
+            remaining = notice[1] - time.monotonic()
+            if remaining <= 0:
+                notice = None
+            else:
+                hud.draw_notice(stage, notice[0], remaining)
 
         # scale the fixed stage into the (possibly resized) window, preserving
         # aspect ratio; fill the leftover with letterbox bars

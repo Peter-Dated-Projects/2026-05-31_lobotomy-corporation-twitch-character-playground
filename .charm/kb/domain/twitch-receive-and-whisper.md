@@ -180,7 +180,7 @@ for new work.
   recipients/day send cap (with no way to raise it) plus the verified-phone prerequisite and
   block/opt-out 400s make whisper replies unworkable for anything beyond a handful of fixed
   operators.
-- **Command channel: in-channel chat commands** (e.g. `!spawn`, `!emote`) read via EventSub,
+- **Command channel: in-channel chat commands** (e.g. `!join`, `!hug`) read via EventSub,
   with **Send Chat Message** for any reply — optionally using `reply_parent_message_id` to
   thread the response to the originating command, or a leading `@mention`. Commands being
   public is acceptable (and often desirable) for an on-stream character playground.

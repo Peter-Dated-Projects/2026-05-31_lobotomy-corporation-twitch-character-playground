@@ -176,7 +176,8 @@ IDLE_TIMEOUT = 1800.0  # seconds (30 min) before an untouched character despawns
 #                        ANY command (spawn/hug/follow/cheer/...) calls touch() and
 #                        resets this, so a character only drops after 30 min of silence
 DESPAWN_SCAN_INTERVAL = 30.0  # seconds between despawn sweeps
-MAX_CHARACTERS = 100  # soft cap; oldest-idle evicted past this
+MAX_CHARACTERS = 100  # hard cap; !join is rejected ("Organization not hiring.")
+#                       when full -- slots free up only via IDLE_TIMEOUT despawns
 
 # Nameplate
 NAMEPLATE_FONT_SIZE = 14

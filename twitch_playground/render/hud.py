@@ -37,6 +37,19 @@ _ACCENT_COLOR = (120, 210, 160)
 _PANEL_COLOR = (12, 14, 18)
 _PANEL_ALPHA = 165
 
+# Transient centered notice (e.g. the full-org join denial). A viewer-facing
+# element, drawn independently of the debug-overlay toggle. LobCorp denial look:
+# dark-red plate, warning-red border. Held for NOTICE_DURATION, fading over the
+# last _NOTICE_FADE seconds. main.py owns the (text, expiry) state and timing.
+NOTICE_DURATION = 2.5  # seconds a notice stays on screen (incl. fade)
+_NOTICE_FADE = 0.6  # seconds of fade-out at the tail
+_NOTICE_FONT_SIZE = 24
+_NOTICE_BG = (40, 12, 14)
+_NOTICE_BG_ALPHA = 230
+_NOTICE_BORDER = (200, 74, 74)
+_NOTICE_TEXT = (236, 222, 222)
+_NOTICE_PAD = 14
+
 # Fonts are built once on first draw (display/font subsystem must exist by then)
 # and cached here -- rebuilding a SysFont every frame is needlessly expensive.
 _fonts: dict[str, pygame.font.Font] = {}
@@ -49,6 +62,7 @@ def _get_fonts() -> tuple[pygame.font.Font, pygame.font.Font]:
         _fonts["regular"] = pygame.font.SysFont(None, _FONT_SIZE)
         bold = pygame.font.SysFont(None, _FONT_SIZE, bold=True)
         _fonts["bold"] = bold
+        _fonts["notice"] = pygame.font.SysFont(None, _NOTICE_FONT_SIZE, bold=True)
     return _fonts["regular"], _fonts["bold"]
 
 
@@ -59,6 +73,36 @@ def draw(screen: pygame.Surface, world, recent_commands: Iterable[ChatCommand] |
 
     _draw_roster(screen, world, regular, bold)
     _draw_command_log(screen, recent, regular, bold)
+
+
+def draw_notice(screen: pygame.Surface, text: str, remaining: float) -> None:
+    """Draw a transient centered banner (e.g. the full-org join denial).
+
+    Drawn independently of the debug overlay's visibility toggle -- it is viewer-
+    facing, not debug chrome. `remaining` is seconds left on the notice; the
+    banner is fully opaque until the last _NOTICE_FADE seconds, then fades out.
+    """
+    _get_fonts()
+    font = _fonts["notice"]
+
+    fade = 1.0 if remaining >= _NOTICE_FADE else max(0.0, remaining / _NOTICE_FADE)
+
+    label = font.render(text, True, _NOTICE_TEXT)
+    w = label.get_width() + _NOTICE_PAD * 2
+    h = label.get_height() + _NOTICE_PAD * 2
+
+    panel = pygame.Surface((w, h), pygame.SRCALPHA)
+    panel.fill((*_NOTICE_BG, _NOTICE_BG_ALPHA))
+    pygame.draw.rect(panel, (*_NOTICE_BORDER, 255), panel.get_rect(), 2)
+    panel.blit(label, (_NOTICE_PAD, _NOTICE_PAD))
+    if fade < 1.0:
+        # uniform fade of a per-pixel-alpha surface: multiply every pixel's alpha
+        # (set_alpha is ignored on SRCALPHA surfaces, so use BLEND_RGBA_MULT)
+        panel.fill((255, 255, 255, int(255 * fade)), special_flags=pygame.BLEND_RGBA_MULT)
+
+    x = (screen.get_width() - w) // 2
+    y = (screen.get_height() - h) // 2
+    screen.blit(panel, (x, y))
 
 
 def _draw_roster(screen, world, regular, bold) -> None:

@@ -3,7 +3,7 @@ id: 0007-command-channel-model
 root: decisions
 type: decision
 status: current
-summary: "Commands arrive as free in-channel chat commands (e.g. !spawn) read via EventSub channel.chat.message; the whisper-as-command-channel idea is rejected (Twitch caps sends at 40 unique recipients/day). Channel Points redeems are reserved for future opt-in gated actions, and !spawn itself may become points-gated later."
+summary: "Commands arrive as free in-channel chat commands (e.g. !join) read via EventSub channel.chat.message; the whisper-as-command-channel idea is rejected (Twitch caps sends at 40 unique recipients/day). Channel Points redeems are reserved for future opt-in gated actions, and !join itself may become points-gated later."
 related:
   - domain/twitch-receive-and-whisper
 created: 2026-06-02
@@ -19,14 +19,15 @@ How viewers drive the on-screen character playground from Twitch.
 - **Receive via EventSub `channel.chat.message`** (WebSocket; ideally an App Access
   Token to avoid channel-join rate limits). IRC/TMI is legacy-but-functional and
   acceptable only for a throwaway prototype.
-- **`!spawn` is a free, public, in-channel command.** Anyone can type it; the bot
+- **`!join` is a free, public, in-channel command** (it spawns the viewer's
+  character). Anyone can type it; the bot
   reacts on-screen. Commands being visible in chat is fine (often desirable) for an
   on-stream toy.
 - **Channel Points redeems are reserved for future opt-in actions.** No such actions
   are defined yet -- this is recorded intent, not implemented behavior. Channel Points
   are the chosen mechanism when we later want cost/cooldown-gated actions (built-in
   gating, private-ish, fixed menu rather than free-form text).
-- **`!spawn` may itself become Channel-Points-gated later** (i.e. spawning costs
+- **`!join` may itself become Channel-Points-gated later** (i.e. spawning costs
   points). Open intent; not built.
 
 ## Why not whispers

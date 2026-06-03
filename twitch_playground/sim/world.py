@@ -35,7 +35,10 @@ class World:
 
     # --- command handling -----------------------------------------------------
 
-    def handle_command(self, cmd: ChatCommand) -> None:
+    def handle_command(self, cmd: ChatCommand) -> str | None:
+        """Dispatch a command. Returns an optional feedback line addressed to the
+        author (e.g. a full-org rejection) for the caller to relay; None when there
+        is nothing to say back."""
         handler = {
             "join": self._cmd_join,
             "hug": self._cmd_hug,
@@ -45,17 +48,24 @@ class World:
             "cheer": self._cmd_cheer,
         }.get(cmd.cmd)
         if handler:
-            handler(cmd)
+            return handler(cmd)
+        return None
 
-    def _cmd_join(self, cmd: ChatCommand) -> None:
+    def _cmd_join(self, cmd: ChatCommand) -> str | None:
         char = self.characters.get(cmd.author)
         if char is None:
+            # Hard cap: the org has MAX_CHARACTERS jobs. When full we reject the
+            # applicant rather than evicting a current employee; idle employees
+            # free their slot by timing out (IDLE_TIMEOUT).
+            if len(self.characters) >= settings.MAX_CHARACTERS:
+                return "Organization not hiring."
             self.spawn(cmd.author)
-            return
+            return None
         char.touch()
         char.hold_autonomy()  # viewer intent wins; do not auto-rejoin right after
         if char.group_id is not None:  # re-joining pulls you out of a cluster
             self._remove_from_group(cmd.author)
+        return None
 
     def _cmd_hug(self, cmd: ChatCommand) -> None:
         if not cmd.args:
@@ -116,8 +126,9 @@ class World:
     # --- spawning / despawning ------------------------------------------------
 
     def spawn(self, username: str) -> Character:
-        if len(self.characters) >= settings.MAX_CHARACTERS:
-            self._evict_oldest(exclude=username)
+        # Low-level creator with no cap of its own; the MAX_CHARACTERS hard cap is
+        # enforced at the viewer entry point (_cmd_join), which rejects rather than
+        # evicting when the org is full.
         m = settings.WALL_MARGIN
         # spawn on the ground platform: feet at GROUND_TOP, random horizontal x
         pos = (random.uniform(m, settings.SCREEN_W - m), settings.GROUND_TOP)
@@ -136,11 +147,6 @@ class World:
             return
         self._remove_from_group(username)
         self.characters.pop(username, None)
-
-    def _evict_oldest(self, exclude: str) -> None:
-        candidates = [(c.last_interaction, u) for u, c in self.characters.items() if u != exclude]
-        if candidates:
-            self._despawn(min(candidates)[1])
 
     def tick_despawn(self, now: float) -> None:
         if now - self._last_despawn_scan < settings.DESPAWN_SCAN_INTERVAL:
