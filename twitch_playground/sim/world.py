@@ -56,9 +56,10 @@ class World:
         if char is None:
             # Hard cap: the org has MAX_CHARACTERS jobs. When full we reject the
             # applicant rather than evicting a current employee; idle employees
-            # free their slot by timing out (IDLE_TIMEOUT).
+            # free their slot by timing out (IDLE_TIMEOUT). The reply @-mentions
+            # the applicant so chat (and the on-screen banner) name who was denied.
             if len(self.characters) >= settings.MAX_CHARACTERS:
-                return "Organization not hiring."
+                return f"@{cmd.author}: Organization not hiring."
             self.spawn(cmd.author)
             return None
         char.touch()

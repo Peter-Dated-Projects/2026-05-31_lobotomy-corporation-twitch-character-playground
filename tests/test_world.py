@@ -65,7 +65,7 @@ def test_join_rejected_when_org_full(provider, monkeypatch, no_autonomy):
     assert len(world.characters) == 2
 
     msg = world.handle_command(ChatCommand(cmd="join", author="c"))
-    assert msg == "Organization not hiring."
+    assert msg == "@c: Organization not hiring."  # @-mentions who was denied
     assert "c" not in world.characters
     assert len(world.characters) == 2  # roster unchanged; nobody evicted
 

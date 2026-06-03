@@ -9,6 +9,7 @@ Keys:
   H  a random viewer hugs another
   F  a random viewer follows another
   L  a random viewer leaves their group
+  K  fill the org to the MAX_CHARACTERS cap (so the next J shows the denial)
   `  (backquote) toggle the debug HUD overlay
 """
 
@@ -26,7 +27,7 @@ from twitch_playground.assets.lobcorp_renderer import LobCorpProvider
 from twitch_playground.assets.provider import AssetProvider, PlaceholderProvider
 from twitch_playground.chat.commands import ChatCommand
 
-HELP = "[dev] J=join  H=hug  F=follow  L=leave  `=toggle HUD"
+HELP = "[dev] J=join  H=hug  F=follow  L=leave  K=fill-to-cap  `=toggle HUD"
 
 
 def make_provider() -> AssetProvider:
@@ -68,6 +69,15 @@ class DevInjector:
             roster = self._roster()
             if roster:
                 self._out.put_nowait(ChatCommand("leave", [], random.choice(roster)))
+        elif key == pygame.K_k:
+            # fill the org up to the cap so the NEXT join (a J press) is the
+            # over-cap applicant that triggers the "Organization not hiring."
+            # denial -- saves pressing J a hundred times. Enqueues only as many
+            # joins as are needed to reach the cap from the current roster.
+            needed = max(0, settings.MAX_CHARACTERS - len(self._roster()))
+            for _ in range(needed):
+                self._counter += 1
+                self._out.put_nowait(ChatCommand("join", [], f"viewer{self._counter}"))
 
     def _two_distinct(self) -> tuple[str | None, str | None]:
         roster = self._roster()
