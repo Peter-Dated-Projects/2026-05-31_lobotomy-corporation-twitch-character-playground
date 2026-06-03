@@ -27,9 +27,17 @@ def main() -> None:
     load_dotenv()
 
     pygame.init()
-    screen = pygame.display.set_mode((settings.SCREEN_W, settings.SCREEN_H), pygame.DOUBLEBUF)
+    window = pygame.display.set_mode(
+        (settings.SCREEN_W, settings.SCREEN_H), pygame.DOUBLEBUF | pygame.RESIZABLE
+    )
     pygame.display.set_caption(settings.CAPTION)
     clock = pygame.time.Clock()
+
+    # The sim and scene draw against a fixed-size stage (the deliberate wide-short
+    # 1920x200 capture band). The OS window is resizable; each frame the stage is
+    # scaled to fit the current window, aspect-preserved with letterbox bars, so
+    # all coordinate math stays in stage space and is untouched by resizing.
+    stage = pygame.Surface((settings.SCREEN_W, settings.SCREEN_H)).convert()
 
     # provider and backdrop must be built after the display exists
     # (convert_alpha / image.load need a video mode)
@@ -56,6 +64,10 @@ def main() -> None:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
+            elif event.type == pygame.VIDEORESIZE:
+                window = pygame.display.set_mode(
+                    (event.w, event.h), pygame.DOUBLEBUF | pygame.RESIZABLE
+                )
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
                     running = False
@@ -75,10 +87,19 @@ def main() -> None:
         world.update(dt)
         world.tick_despawn(time.monotonic())
         background.update(dt)
-        background.draw(screen)  # owns the base fill; clears last frame
-        scene.draw(screen, world)
+        background.draw(stage)  # owns the base fill; clears last frame
+        scene.draw(stage, world)
         if hud_visible:
-            hud.draw(screen, world, recent_commands)
+            hud.draw(stage, world, recent_commands)
+
+        # scale the fixed stage into the (possibly resized) window, preserving
+        # aspect ratio; fill the leftover with letterbox bars
+        win_w, win_h = window.get_size()
+        scale = min(win_w / settings.SCREEN_W, win_h / settings.SCREEN_H)
+        dst_w, dst_h = round(settings.SCREEN_W * scale), round(settings.SCREEN_H * scale)
+        window.fill((0, 0, 0))
+        scaled = pygame.transform.smoothscale(stage, (dst_w, dst_h))
+        window.blit(scaled, ((win_w - dst_w) // 2, (win_h - dst_h) // 2))
         pygame.display.flip()
 
     pygame.quit()

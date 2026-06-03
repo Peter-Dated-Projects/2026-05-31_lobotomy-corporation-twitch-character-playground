@@ -33,7 +33,14 @@ TRIANGLE_COUNT = 50
 TRI_MIN_SIZE = 10
 TRI_MAX_SIZE = 48
 TRI_COLOR = (255, 255, 255)
-TRI_ALPHA = 26  # low opacity so triangles read as a faint shimmer
+TRI_ALPHA = 90  # opacity of the triangle outline
+TRI_LINE_WIDTH = 2  # >0 draws the polygon hollow (outline only)
+# The source backdrop reads too vivid behind the characters. A translucent
+# neutral overlay, baked into the cached image once at load, mutes it: it washes
+# saturation toward gray and dims the whole frame so the crowd stays the focus.
+BG_DULL_COLOR = (28, 28, 30)
+BG_DULL_ALPHA = 130
+
 TRI_RISE_MIN = 5.0  # px/sec upward
 TRI_RISE_MAX = 20.0
 TRI_SPIN_MIN = -22.0  # deg/sec; sign gives clockwise / counter-clockwise mix
@@ -96,7 +103,12 @@ class Background:
         scaled = pygame.transform.smoothscale(img, (round(iw * scale), round(ih * scale)))
         crop = pygame.Rect(0, 0, w, h)
         crop.center = (scaled.get_width() // 2, scaled.get_height() // 2)
-        return scaled.subsurface(crop).copy()
+        fitted = scaled.subsurface(crop).copy()
+        # mute the backdrop: bake a translucent neutral overlay over it
+        dull = pygame.Surface((w, h), pygame.SRCALPHA)
+        dull.fill((*BG_DULL_COLOR, BG_DULL_ALPHA))
+        fitted.blit(dull, (0, 0))
+        return fitted
 
     # -- triangles ---------------------------------------------------------
     def _spawn(self, *, initial: bool) -> Triangle:
@@ -122,15 +134,19 @@ class Background:
                 self.triangles[i] = self._spawn(initial=False)
 
     def _base_surface(self, size: int) -> pygame.Surface:
-        """An upward-pointing translucent-white triangle on a transparent square,
-        cached per integer size so we rotate-and-blit rather than re-rasterize."""
+        """An upward-pointing hollow translucent-white triangle on a transparent
+        square, cached per integer size so we rotate-and-blit rather than
+        re-rasterize. ``TRI_LINE_WIDTH`` > 0 makes the polygon an outline."""
         surf = self._base_cache.get(size)
         if surf is None:
             surf = pygame.Surface((size, size), pygame.SRCALPHA)
+            # inset by the line width so the stroke stays inside the surface
+            w = TRI_LINE_WIDTH
             pygame.draw.polygon(
                 surf,
                 (*TRI_COLOR, TRI_ALPHA),
-                [(size / 2, 0), (0, size), (size, size)],
+                [(size / 2, w), (w, size - w), (size - w, size - w)],
+                w,
             )
             self._base_cache[size] = surf
         return surf

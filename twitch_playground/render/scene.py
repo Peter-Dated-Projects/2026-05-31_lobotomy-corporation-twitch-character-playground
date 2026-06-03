@@ -13,9 +13,10 @@ from twitch_playground.sim.platforms import Platform
 from twitch_playground.sim.world import World
 
 # Render-only palette (kept local; settings.py is owned by another track).
-_GROUND_COLOR = (40, 44, 54)
-_PLATFORM_COLOR = (58, 64, 78)
-_PLATFORM_EDGE = (96, 104, 124)
+# Warm neutral gray: R >= G > B gives a faint yellow cast, no blue.
+_GROUND_COLOR = (50, 48, 40)
+_PLATFORM_COLOR = (66, 63, 52)
+_PLATFORM_EDGE = (108, 103, 86)
 _PLATFORM_THICKNESS = 12  # drawn height of a floating slab below its top edge
 
 
