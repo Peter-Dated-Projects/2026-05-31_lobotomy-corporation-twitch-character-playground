@@ -19,6 +19,7 @@ from twitch_playground.chat.bot import start_chat_thread
 from twitch_playground.chat.commands import ChatCommand
 from twitch_playground.dev import HELP, DevInjector, make_provider
 from twitch_playground.render import hud, scene
+from twitch_playground.render.background import Background
 from twitch_playground.sim.world import World
 
 
@@ -30,8 +31,10 @@ def main() -> None:
     pygame.display.set_caption(settings.CAPTION)
     clock = pygame.time.Clock()
 
-    # provider must be built after the display exists (convert_alpha needs it)
+    # provider and backdrop must be built after the display exists
+    # (convert_alpha / image.load need a video mode)
     world = World(make_provider())
+    background = Background((settings.SCREEN_W, settings.SCREEN_H))
     command_queue: "queue.Queue[ChatCommand]" = queue.Queue()
 
     if start_chat_thread(command_queue) is not None:
@@ -71,6 +74,8 @@ def main() -> None:
 
         world.update(dt)
         world.tick_despawn(time.monotonic())
+        background.update(dt)
+        background.draw(screen)  # owns the base fill; clears last frame
         scene.draw(screen, world)
         if hud_visible:
             hud.draw(screen, world, recent_commands)

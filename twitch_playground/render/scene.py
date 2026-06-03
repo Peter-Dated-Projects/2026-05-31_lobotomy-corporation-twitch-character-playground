@@ -20,7 +20,8 @@ _PLATFORM_THICKNESS = 12  # drawn height of a floating slab below its top edge
 
 
 def draw(screen: pygame.Surface, world: World) -> None:
-    screen.fill(settings.BG_COLOR)
+    # The backdrop layer (render/background.py) owns the base fill and is drawn
+    # before this; scene.draw only lays platforms and characters on top.
     _draw_platforms(screen, world.platforms)
     # back-to-front: characters lower on screen (larger feet-y) overlap those behind
     for char in sorted(world.characters.values(), key=lambda c: c.pos.y):
