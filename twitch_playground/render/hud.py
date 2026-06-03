@@ -49,6 +49,8 @@ _NOTICE_BG_ALPHA = 230
 _NOTICE_BORDER = (200, 74, 74)
 _NOTICE_TEXT = (236, 222, 222)
 _NOTICE_PAD = 14
+_NOTICE_BOTTOM_MARGIN = 6  # gap from the bottom edge; anchors the banner down in
+#                            the ground/platform band so it does not cover the crowd
 
 # Fonts are built once on first draw (display/font subsystem must exist by then)
 # and cached here -- rebuilding a SysFont every frame is needlessly expensive.
@@ -79,8 +81,10 @@ def draw_notice(screen: pygame.Surface, text: str, remaining: float) -> None:
     """Draw a transient centered banner (e.g. the full-org join denial).
 
     Drawn independently of the debug overlay's visibility toggle -- it is viewer-
-    facing, not debug chrome. `remaining` is seconds left on the notice; the
-    banner is fully opaque until the last _NOTICE_FADE seconds, then fades out.
+    facing, not debug chrome. Horizontally centered but anchored near the bottom
+    edge (the ground/platform band) so it does not cover the crowd. `remaining` is
+    seconds left on the notice; fully opaque until the last _NOTICE_FADE seconds,
+    then fades out.
     """
     _get_fonts()
     font = _fonts["notice"]
@@ -101,7 +105,7 @@ def draw_notice(screen: pygame.Surface, text: str, remaining: float) -> None:
         panel.fill((255, 255, 255, int(255 * fade)), special_flags=pygame.BLEND_RGBA_MULT)
 
     x = (screen.get_width() - w) // 2
-    y = (screen.get_height() - h) // 2
+    y = screen.get_height() - h - _NOTICE_BOTTOM_MARGIN
     screen.blit(panel, (x, y))
 
 
