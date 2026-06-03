@@ -172,7 +172,9 @@ HUG_DURATION = 1.2  # seconds
 EMOTE_DECAY_PER_SEC = 0.0022
 
 # Lifecycle
-IDLE_TIMEOUT = 300.0  # seconds before an untouched character despawns
+IDLE_TIMEOUT = 1800.0  # seconds (30 min) before an untouched character despawns;
+#                        ANY command (spawn/hug/follow/cheer/...) calls touch() and
+#                        resets this, so a character only drops after 30 min of silence
 DESPAWN_SCAN_INTERVAL = 30.0  # seconds between despawn sweeps
 MAX_CHARACTERS = 100  # soft cap; oldest-idle evicted past this
 
