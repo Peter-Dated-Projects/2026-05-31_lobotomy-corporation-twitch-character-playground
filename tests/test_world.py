@@ -300,6 +300,7 @@ def _freeze_wander(monkeypatch):
 def test_autonomous_join_forms_a_cluster(provider, calm, monkeypatch):
     """Two eager-joiner wanderers standing near each other autonomously gravitate
     into a cluster -- no chat command involved."""
+    monkeypatch.setattr(settings, "AUTONOMOUS_GROUPING", True)  # default is off; opt in to exercise the layer
     _freeze_wander(monkeypatch)
     world = World(provider)
     a, b = world.spawn("a"), world.spawn("b")
@@ -323,6 +324,7 @@ def test_autonomous_join_forms_a_cluster(provider, calm, monkeypatch):
 def test_autonomous_leave_when_restless_loner_in_small_cluster(provider, calm, monkeypatch):
     """A restless contrarian stuck in a small cluster peels off on its own once
     the commit dwell has elapsed -- the symmetric leave check."""
+    monkeypatch.setattr(settings, "AUTONOMOUS_GROUPING", True)  # default is off; opt in to exercise the layer
     _freeze_wander(monkeypatch)
     world = World(provider)
     a, b = world.spawn("a"), world.spawn("b")
