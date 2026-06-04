@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "charm": {
+      "command": "charm-mcp",
+      "args": [],
+      "env": {}
+    }
+  }
+}
