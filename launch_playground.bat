@@ -4,7 +4,7 @@ REM Runs: uv run playground  from the project directory.
 
 cd /d "%~dp0"
 
-"C:\Users\peter\.local\bin\uv.exe" run playground
+uv run playground
 
 REM Keep the window open if the program exits with an error so logs are visible.
 if errorlevel 1 (
