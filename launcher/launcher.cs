@@ -27,6 +27,7 @@ class Launcher
             Arguments = "run playground",
             WorkingDirectory = projectDir,
             UseShellExecute = false,
+            CreateNoWindow = true, // suppress the child uv/python console window
         };
 
         try
