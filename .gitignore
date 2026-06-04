@@ -1,0 +1,12 @@
+# Charm run state is ephemeral and ignored, EXCEPT the durable knowledge base.
+# `.charm/*` ignores the run-state children; `!.charm/kb/` re-includes the KB.
+.charm/*
+!.charm/kb/
+
+# Secrets
+.env
+
+# Python / uv
+.venv/
+__pycache__/
+*.pyc
