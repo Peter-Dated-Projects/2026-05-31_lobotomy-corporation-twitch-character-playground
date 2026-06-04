@@ -5,7 +5,7 @@
 $dir = $PSScriptRoot
 $ws  = New-Object -ComObject WScript.Shell
 $sc  = $ws.CreateShortcut((Join-Path $dir 'Twitch Playground.lnk'))
-$sc.TargetPath       = Join-Path $dir 'launch_playground.bat'
+$sc.TargetPath       = Join-Path $dir 'launcher\Twitch Playground.exe'
 $sc.WorkingDirectory = $dir
 $sc.IconLocation     = (Join-Path $dir 'twitch_playground\assets\playground.ico') + ',0'
 $sc.Description      = 'Lobotomy Corporation Twitch character playground'
