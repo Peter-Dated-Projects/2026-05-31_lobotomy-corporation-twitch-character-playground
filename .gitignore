@@ -6,7 +6,13 @@
 # Secrets
 .env
 
+# Machine-specific shortcut (absolute path). Regenerate with make_shortcut.bat.
+Twitch Playground.lnk
+
 # Python / uv
 .venv/
 **/__pycache__/
 *.pyc
+
+
+**.exe
