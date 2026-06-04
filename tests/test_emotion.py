@@ -168,8 +168,8 @@ def test_arousal_speeds_up_movement(make_char, calm, monkeypatch):
     from twitch_playground.sim.platforms import default_level
 
     level = default_level()
-    calm_char = make_char(x=480.0)
-    hot_char = make_char(x=480.0)
+    calm_char = make_char(x=255.0)
+    hot_char = make_char(x=255.0)
     calm_char.update(1 / 60, [], level)
     hot_char.update(1 / 60, [], level)
     calm_char._wander_heading = hot_char._wander_heading = settings.WALK_SPEED

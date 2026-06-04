@@ -2,10 +2,21 @@
 
 import os
 
-# Window / render
-SCREEN_W = 850  # compact stage; the OS window is resizable and scales this up
-SCREEN_H = 200  # taller band than before -> more vertical headroom; the level
-#                 (GROUND_TOP / JUMP_SPEED / default_level below) is tuned for it
+# Window / render. The sim and scene draw against this fixed-size logical stage;
+# main.py renders it to an offscreen framebuffer and upscales that to the (resizable)
+# OS window. So a SMALLER stage zooms IN: each 32x40 sprite covers a bigger fraction
+# of the stage, and the framebuffer upscale enlarges everything uniformly. 510x120
+# keeps the original ~4.25:1 band aspect (so letterboxing is unchanged) while making
+# characters ~1.67x bigger than the old 850x200 stage.
+SCREEN_W = 510
+SCREEN_H = 120
+# Initial OS window size (the stage is scaled to fit this, aspect-preserved with
+# letterbox bars where the aspects differ). Independent of the stage resolution
+# above and freely resizable at runtime -- this only sets the opening size. Width
+# is matched to the stage aspect (SCREEN_W/SCREEN_H) at this height so the stage
+# fills the window with no letterbox bars.
+WINDOW_H = 250
+WINDOW_W = round(WINDOW_H * SCREEN_W / SCREEN_H)  # 1063 -> same 4.25:1 as the stage
 FPS = 24  # deliberate low-fps / stop-motion look; movement is delta-time based
 CAPTION = "LobCorp Twitch Playground"
 BG_COLOR = (24, 26, 32)
@@ -32,13 +43,13 @@ MAX_FORCE = 240.0  # px/s^2; cap on how sharply horizontal velocity can change
 
 # Sidescroller physics (px, px/s, px/s^2). Smaller y is higher on screen, so a
 # jump is a negative y velocity and gravity is positive.
-GROUND_TOP = SCREEN_H - 40  # feet-y of the ground surface; leaves a ~40px ground
-#                             band at the bottom and ~260px of headroom above it
-#                             for the floating tier + jump arc.
+GROUND_TOP = SCREEN_H - 28  # feet-y of the ground surface; leaves a ~28px ground
+#                             band at the bottom and the rest as headroom above it
+#                             for the jump arc + nameplate.
 GRAVITY = 1200.0
-JUMP_SPEED = 480.0  # initial hop speed; apex ~JUMP_SPEED^2/(2*GRAVITY) ~= 96px.
-#                     Clears the floating tier's 70px gap with ~26px margin, so
-#                     that tier stays reachable in one jump from the ground.
+JUMP_SPEED = 260.0  # initial hop speed; apex ~JUMP_SPEED^2/(2*GRAVITY) ~= 28px. A
+#                     low cosmetic hop -- there are no platforms to clear, and it
+#                     keeps the sprite + nameplate inside the short zoomed-in view.
 WALK_SPEED = 60.0  # horizontal stroll speed on a surface
 
 # Wander decisions. Chances are per-second and multiplied by dt for a per-frame

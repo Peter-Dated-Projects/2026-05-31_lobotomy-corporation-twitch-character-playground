@@ -29,7 +29,6 @@ def test_forced_jump_rises_then_lands_back_on_ground(make_char, calm, monkeypatc
     monkeypatch.setattr(settings, "WALK_SPEED", 0.0)  # purely vertical hop
     level = default_level()
     ground = level[0]
-    # x=50 sits under the ground only -- clear of every floating platform span.
     char = make_char(x=50.0)
     char.update(1 / 120, [], level)  # bind to the ground first
     assert char.platform is ground
@@ -37,11 +36,14 @@ def test_forced_jump_rises_then_lands_back_on_ground(make_char, calm, monkeypatc
     char.velocity.y = -settings.JUMP_SPEED
     char.platform = None  # now airborne
 
+    # The hop apex is ~JUMP_SPEED^2 / (2*GRAVITY); require it clears a fraction of
+    # that so the threshold stays honest if the jump is retuned.
+    rise_target = settings.JUMP_SPEED**2 / (2 * settings.GRAVITY) * 0.5
     rose = False
     landed = False
     for _ in range(600):  # up to ~5s of sim time at dt=1/120
         char.update(1 / 120, [], level)
-        if char.pos.y < settings.GROUND_TOP - 50:
+        if char.pos.y < settings.GROUND_TOP - rise_target:
             rose = True
         if char.platform is not None:
             landed = True
@@ -56,7 +58,7 @@ def test_forced_jump_rises_then_lands_back_on_ground(make_char, calm, monkeypatc
 
 def test_clip_is_jump_while_airborne(make_char, calm):
     level = default_level()
-    char = make_char(x=50.0, y=settings.GROUND_TOP - 130)  # up in the air
+    char = make_char(x=50.0, y=settings.GROUND_TOP - 40)  # up in the air
     char.platform = None
     char.velocity.y = -300.0  # rising, so it won't land this frame
     char.update(1 / 60, [], level)
@@ -66,7 +68,7 @@ def test_clip_is_jump_while_airborne(make_char, calm):
 
 def test_clip_is_walk_while_strolling_on_a_surface(make_char, calm):
     level = default_level()
-    char = make_char(x=480.0)
+    char = make_char(x=255.0)
     # Velocity now eases up over a few frames instead of snapping to full speed,
     # so give it time to cross WALK_THRESHOLD before asserting the walk clip.
     for _ in range(15):
@@ -78,7 +80,7 @@ def test_clip_is_walk_while_strolling_on_a_surface(make_char, calm):
 
 def test_clip_is_idle_while_paused_on_a_surface(make_char, calm):
     level = default_level()
-    char = make_char(x=480.0)
+    char = make_char(x=255.0)
     char.update(1 / 60, [], level)  # bind + start strolling
     char._pause_timer = 5.0  # force an idle pause
     # While paused the desired velocity is 0; easing brings velocity.x to a true
@@ -95,7 +97,7 @@ def test_velocity_eases_rather_than_snapping(make_char, calm, monkeypatch):
     monkeypatch.setattr(settings, "WANDER_DISPLACE", 0.0)
     monkeypatch.setattr(settings, "WANDER_REORIENT_CHANCE", 0.0)
     level = default_level()
-    char = make_char(x=480.0)
+    char = make_char(x=255.0)
     char.update(1 / 60, [], level)  # bind to the ground
     char.velocity.x = 0.0
     char._wander_heading = settings.WALK_SPEED  # want full-speed rightward stroll
@@ -116,7 +118,7 @@ def test_facing_follows_velocity_with_deadzone(make_char, calm, monkeypatch):
     monkeypatch.setattr(settings, "WANDER_DISPLACE", 0.0)
     monkeypatch.setattr(settings, "WANDER_REORIENT_CHANCE", 0.0)
     level = default_level()
-    char = make_char(x=480.0)
+    char = make_char(x=255.0)
     char.update(1 / 60, [], level)
 
     # A clear rightward stroll commits facing right.

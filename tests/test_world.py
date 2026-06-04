@@ -260,8 +260,8 @@ def test_rejoin_pulls_sender_out_of_a_cluster(provider, calm, no_autonomy):
 
 
 def test_character_walks_the_full_stage_width(provider, calm, monkeypatch):
-    """A grounded character can stroll the full 1920-wide ground without leaving
-    the playfield -- it clamps/turns at the walls, it does not fall off or stick."""
+    """A grounded character can stroll the full ground width without leaving the
+    playfield -- it clamps/turns at the walls, it does not fall off or stick."""
     _freeze_wander(monkeypatch)
     world = World(provider)
     char = world.spawn("walker")
@@ -274,7 +274,8 @@ def test_character_walks_the_full_stage_width(provider, calm, monkeypatch):
     char.velocity = Vector2(settings.WALK_SPEED, 0)
 
     max_x = char.pos.x
-    # ~1850px to cross at WALK_SPEED (60px/s) is ~31s; give a comfortable margin.
+    # Crossing the ground at WALK_SPEED (60px/s) takes a few seconds; the loop
+    # gives a comfortable margin so a slow ramp-up still reaches the far wall.
     for _ in range(2400):  # 40s at dt=1/60
         world.update(1 / 60)
         assert char.platform is world.platforms[0]  # stays grounded the whole way
@@ -285,28 +286,32 @@ def test_character_walks_the_full_stage_width(provider, calm, monkeypatch):
     assert max_x >= settings.SCREEN_W - 100
 
 
-def test_character_jumps_onto_the_floating_tier(provider, calm, monkeypatch):
-    """A hop from the ground directly below a floating slab lands the character on
-    that slab -- the reachability invariant exercised through the real physics."""
+def test_character_hop_lands_back_on_the_ground(provider, calm, monkeypatch):
+    """A straight-up hop rises to its apex and falls back onto the single floor --
+    the jump physics exercised end-to-end now that there are no floating tiers."""
     _freeze_wander(monkeypatch)
     world = World(provider)
-    slab = world.platforms[1]  # a floating slab
+    ground = world.platforms[0]
     char = world.spawn("jumper")
     world.update(1 / 60)  # bind to the ground
 
-    # Stand directly under the slab's center and hop straight up.
-    char.pos = Vector2(slab.center_x, settings.GROUND_TOP)
+    # Hop straight up from the ground.
+    char.pos = Vector2(settings.SCREEN_W / 2, settings.GROUND_TOP)
     char.velocity = Vector2(0.0, -settings.JUMP_SPEED)
     char._wander_heading = 0.0
     char.platform = None  # airborne
 
-    for _ in range(120):  # 2s: rise to apex and fall back onto the slab
+    rose_above_ground = False
+    for _ in range(120):  # 2s: rise to apex and fall back onto the ground
         world.update(1 / 60)
-        if char.platform is slab:
+        if char.platform is None:
+            rose_above_ground = rose_above_ground or char.pos.y < settings.GROUND_TOP
+        elif char.platform is ground:
             break
 
-    assert char.platform is slab, "character failed to land on the floating tier"
-    assert char.pos.y == slab.top
+    assert rose_above_ground, "character never left the ground"
+    assert char.platform is ground, "character failed to land back on the ground"
+    assert char.pos.y == ground.top
 
 
 # --- autonomous grouping (L4) -------------------------------------------------

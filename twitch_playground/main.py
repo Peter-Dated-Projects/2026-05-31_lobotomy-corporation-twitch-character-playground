@@ -29,7 +29,7 @@ def main() -> None:
 
     pygame.init()
     window = pygame.display.set_mode(
-        (settings.SCREEN_W, settings.SCREEN_H), pygame.DOUBLEBUF | pygame.RESIZABLE
+        (settings.WINDOW_W, settings.WINDOW_H), pygame.DOUBLEBUF | pygame.RESIZABLE
     )
     pygame.display.set_caption(settings.CAPTION)
     clock = pygame.time.Clock()

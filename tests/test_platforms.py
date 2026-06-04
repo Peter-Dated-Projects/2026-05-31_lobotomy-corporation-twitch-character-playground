@@ -24,17 +24,9 @@ def test_default_level_ground_is_full_width_index_0():
     assert ground.top == settings.GROUND_TOP
 
 
-def test_default_level_floating_tiers_reachable_in_one_jump():
-    """Every floating tier must sit within a single jump's apex of the ground --
-    the contract's reachability invariant. Derived from the live physics so it
-    stays honest if JUMP_SPEED / GRAVITY are retuned."""
-    apex = settings.JUMP_SPEED**2 / (2 * settings.GRAVITY)
-    level = default_level()
-    ground = level[0]
-    for p in level[1:]:
-        gap = ground.top - p.top  # rise needed to reach this tier from the ground
-        assert gap > 0, f"floating tier at top={p.top} is not above the ground"
-        assert gap <= apex, f"tier gap {gap}px exceeds jump apex {apex:.1f}px"
+def test_default_level_is_ground_only():
+    """The level is just the full-width ground -- no floating tiers."""
+    assert len(default_level()) == 1
 
 
 def test_default_level_platforms_within_screen_bounds():
@@ -42,20 +34,6 @@ def test_default_level_platforms_within_screen_bounds():
     for p in level:
         assert 0 <= p.left < p.right <= settings.SCREEN_W
         assert 0 <= p.top <= settings.SCREEN_H
-
-
-def test_default_level_floating_tiers_clear_nameplate_zone():
-    """A character standing on a floating tier (feet at the tier top) plus its
-    sprite and the nameplate above it must not clip off the top of the short
-    stage. Headroom = sprite height + a small gap + an approximate nameplate
-    band; if this ever fails the tier is too high for 200px."""
-    headroom = settings.SPRITE_H + 2 + settings.NAMEPLATE_FONT_SIZE + 10
-    level = default_level()
-    for p in level[1:]:
-        assert p.top - headroom >= 0, (
-            f"tier at top={p.top} leaves only {p.top}px above feet; "
-            f"need >= {headroom}px for sprite + nameplate"
-        )
 
 
 def test_landing_none_when_rising():
