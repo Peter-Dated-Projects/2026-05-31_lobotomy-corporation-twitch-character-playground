@@ -5,12 +5,16 @@ type: domain
 status: current
 summary: "The two asset folders and their sprite sheet categories — what files exist, what each sheet contains, and how sheets are laid out."
 created: 2026-06-01
-updated: 2026-06-01
+updated: 2026-06-03
 ---
 
 # LobCorp Sprite Sheet Catalog
 
-Asset root: `~/Downloads/drive-download-20260601T210823Z-3-001/`
+Asset root: `twitch_playground/assets/sprites/` — the 29 sheets the renderer
+actually uses are vendored into the package, so a fresh checkout has art with no
+external download. Set `LOBCORP_ASSETS_ROOT` to point at the original full drop
+(the `~/Downloads/drive-download-20260601T210823Z-3-001/` Google Drive export)
+when adding characters that need sheets not yet vendored.
 
 Two subfolders:
 

@@ -185,12 +185,15 @@ NAMEPLATE_COLOR = (235, 235, 235)
 NAMEPLATE_OUTLINE = (0, 0, 0)
 
 # --- LobCorp sprite assets ---------------------------------------------------
-# Root of the extracted sprite-sheet drop. Override with LOBCORP_ASSETS_ROOT to
-# point at a different checkout; nothing here touches the filesystem at import
-# time -- only the extraction layer reads these on demand.
+# Root of the extracted sprite-sheet drop. The sheets the renderer actually uses
+# are vendored into the package at assets/sprites/, so a fresh checkout has art
+# with no external download. Override with LOBCORP_ASSETS_ROOT to point at a
+# fuller drop (e.g. the original Google Drive export) when adding new characters.
+# Nothing here touches the filesystem at import time -- only the extraction layer
+# reads these on demand.
 ASSETS_ROOT = os.environ.get(
     "LOBCORP_ASSETS_ROOT",
-    os.path.expanduser("~/Downloads/drive-download-20260601T210823Z-3-001"),
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "sprites"),
 )
 PARTS_DIR = os.path.join(ASSETS_ROOT, "Employee Parts")
 CLOTHES_DIR = os.path.join(ASSETS_ROOT, "Employee Clothes and Weapons")
