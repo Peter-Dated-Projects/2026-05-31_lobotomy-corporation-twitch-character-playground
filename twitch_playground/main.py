@@ -1,8 +1,9 @@
 """Entry point: owns the clock, the event loop, and the command-queue drain.
 
 Run with:  uv run playground
-The Twitch listener starts automatically if TWITCH_TOKEN/TWITCH_CHANNEL are set;
-otherwise it runs in dev mode (keyboard injector only).
+The Twitch listener starts automatically if TWITCH_ACCESS_TOKEN/TWITCH_CHANNEL are
+set (the access token is validated and refreshed via TWITCH_REFRESH_TOKEN on
+startup if it has expired); otherwise it runs in dev mode (keyboard injector only).
 """
 
 from __future__ import annotations
@@ -48,7 +49,7 @@ def main() -> None:
     if start_chat_thread(command_queue) is not None:
         print("[main] Twitch listener started")
     else:
-        print("[main] dev mode (no TWITCH_TOKEN/TWITCH_CHANNEL). " + HELP)
+        print("[main] dev mode (no usable TWITCH_ACCESS_TOKEN/TWITCH_CHANNEL). " + HELP)
 
     injector = DevInjector(command_queue, lambda: list(world.characters))
 

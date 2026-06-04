@@ -6,7 +6,7 @@ import os
 SCREEN_W = 850  # compact stage; the OS window is resizable and scales this up
 SCREEN_H = 200  # taller band than before -> more vertical headroom; the level
 #                 (GROUND_TOP / JUMP_SPEED / default_level below) is tuned for it
-FPS = 12  # deliberate low-fps / stop-motion look; movement is delta-time based
+FPS = 24  # deliberate low-fps / stop-motion look; movement is delta-time based
 CAPTION = "LobCorp Twitch Playground"
 BG_COLOR = (24, 26, 32)
 WALL_MARGIN = 36  # characters bounce / clamp inside this inset
