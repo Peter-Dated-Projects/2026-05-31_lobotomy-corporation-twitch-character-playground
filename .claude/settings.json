@@ -12,7 +12,8 @@
       "mcp__charm__set_session_description",
       "mcp__charm__spawn_review_agents",
       "mcp__charm__spawn_workers",
-      "mcp__charm__update_plan"
+      "mcp__charm__update_plan",
+      "mcp__charm__*"
     ]
   }
 }
