@@ -50,3 +50,42 @@ Note: Carmen has no portrait-free body file identified (only `Carmen-resources.a
 - **`binahCG*`, `binahSpawn`, `BinahShadow`** -- scene assets, not character sprites.
 - **Shadow files (`chesed_Shadow`, `m_Shadow*`, etc.)** -- drop-shadow layer assets.
 - **Background files (`AngelaBackground`, `yesodBK`, `officeBK`, etc.)** -- scene backgrounds.
+
+---
+
+## Other Finds
+
+### Ordeals/Fixers and Ordeals/Sweeper
+
+**Verdict: not usable as standing body sprites.**
+
+Both directories contain sprite-part sheets -- body parts (head, torso, limbs, weapon) laid out scattered on a transparent background, not assembled into a single standing figure. These are rigging/animation source sheets.
+
+- Fixers bodies (4 files, all named `body-resources.assets-*.png`): humanoid characters in gold/blue or dark armored styles, but parts-exploded. No single assembled standing sprite.
+- Sweeper files (`cleaner`, `10`, `2h`, `3h`): dark mechanical creature with insect/crab proportions and red glowing eyes. Non-humanoid silhouette even if assembled. Not suitable as a speaking character body.
+
+### Speech Balloon
+
+`/Users/petthepotat/Downloads/drive-download-20260606T214433Z-3-001/Unknown/AgentSpeechBalloon-resources.assets-892.png`
+
+**Usable as speech bubble frame.**
+
+Simple near-square flat-color panel: gray fill with a salmon/red-coral border (~8px). No pointer/tail, no decorations -- purely a rectangular container. Clean and minimal. Suitable as the speech bubble background when compositing viewer text over the robot body. Would need a text renderer layered on top; the frame itself contributes no pointer, so position relative to the robot head should be chosen by the game engine.
+
+### Unsure/
+
+Nothing relevant. All files are Korean-named screen effect animation frames:
+- `화면노이즈_*` (screen noise, 13 frames)
+- `환상체탈출노이즈_*` (aberration/phantom escape noise, 14 frames)
+- `지구본본_*` (globe animation, 1 visible frame)
+
+All are abstract animated overlays (noise, distortion). No humanoid sprites.
+
+### Temp Special Effects folder
+
+No speaking/voice-specific effects. All files are generic combat and particle FX. Two categories worth noting for future pairing:
+
+- **Electricity/sparkle** -- `CFX_ElectricSparkle`, `CFX_T_Anim7_Electricity`: could layer over a robot body as a "signal transmitting" speaking aura.
+- **Bubble** -- `CFX_T_Anim4_Bubble`, `CFX_T_Bubble`: bubble-pop animations that could animate a speech bubble appearing.
+
+Everything else (flame, smoke, slash, teleport, shadow, waterfall, hit) is combat-purpose and not relevant to a speaking animation.
