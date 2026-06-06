@@ -6,6 +6,10 @@
 # Secrets
 .env
 
+# Reference voice clips: derived from third-party YouTube audio, machine-local.
+# Rebuild with `uv run scripts/setup_voices.py`.
+twitch_playground/assets/voices/
+
 # Machine-specific shortcut (absolute path). Regenerate with make_shortcut.bat.
 Twitch Playground.lnk
 
