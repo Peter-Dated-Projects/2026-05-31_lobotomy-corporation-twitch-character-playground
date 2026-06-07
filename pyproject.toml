@@ -2,7 +2,9 @@
 name = "twitch-playground"
 version = "0.1.0"
 description = "Lobotomy Corporation Twitch character playground"
-requires-python = ">=3.10,<3.11"
+# Bumped from >=3.10 for the speak feature: kanade-tokenizer (KokoClone voice
+# conversion) hard-requires Python >=3.12. Matches the verified KokoClone spike.
+requires-python = ">=3.12,<3.13"
 dependencies = [
     "pygame-ce>=2.4",
     "twitchio>=2.10,<3",
@@ -10,6 +12,17 @@ dependencies = [
     "Pillow>=10",
     "numpy>=1.24",
     "scipy>=1.10",
+    # Speak feature (KokoClone voice clone TTS + swear filter). See
+    # twitch_playground/speak/. torch>=2.9 needs torchcodec for audio IO.
+    "kokoro-onnx>=0.4",
+    "misaki[en]>=0.8",
+    "torch>=2.9",
+    "torchaudio>=2.9",
+    "torchcodec>=0.5",
+    "soundfile>=0.12",
+    "huggingface_hub>=0.25",
+    "kanade-tokenizer @ git+https://github.com/frothywater/kanade-tokenizer",
+    "better-profanity>=0.7",
 ]
 
 [project.scripts]
@@ -28,3 +41,25 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["twitch_playground"]
+
+# Allow the kanade-tokenizer git+https direct reference dependency above.
+[tool.hatch.metadata]
+allow-direct-references = true
+
+# --- GPU torch wheels -------------------------------------------------------
+# The streaming PC's RTX 5070Ti is Blackwell (sm_120) and needs a CUDA 12.8+
+# torch build (cu128); the default PyPI torch wheel is CPU-only on Windows/Linux
+# and would silently run slower than real-time. Pull torch/torchaudio from the
+# cu128 index, but ONLY on non-macOS -- no CUDA wheels exist for macOS, where
+# the default wheel (CPU/MPS) must keep working for local dev.
+#
+# GPU box one-liner if you ever need to (re)install torch by hand:
+#   uv pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu128
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cu128", marker = "sys_platform != 'darwin'" }]
+torchaudio = [{ index = "pytorch-cu128", marker = "sys_platform != 'darwin'" }]
