@@ -27,9 +27,14 @@ dependencies = [
 
 [project.scripts]
 playground = "twitch_playground.main:main"
+robot = "twitch_playground.robot.renderer:main"          # face renderer + backend
+robot-debug = "twitch_playground.robot.server:main"      # headless web control panel
 
 [dependency-groups]
 dev = ["pytest>=8"]
+# Robot TTS test harness (web control panel + backend). Kept out of the game's
+# runtime deps -- only needed for `frieren run robot`. Install with `uv sync --group robot`.
+robot = ["fastapi>=0.110", "uvicorn>=0.29"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
