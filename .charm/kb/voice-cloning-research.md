@@ -1,11 +1,11 @@
 # Voice Cloning Research: Sephirah TTS
 
-> SUPERSEDED IN PART (2026-06-07): the engine recommendation below (Kokoro +
-> KokoClone) predates the runtime spikes. See `tts-engine-decision.md` for the
-> current call — KokoClone and XTTS v2 were both benchmarked, XTTS v2 turned out
-> to be non-commercial-licensed, and Chatterbox (MIT) is now the recommended
-> path for a monetized stream. This doc is kept for the model survey and the
-> reference-audio / preprocessing pipeline, which are still valid.
+> SUPERSEDED IN PART (2026-06-07): the engine details below predate the runtime
+> spikes. See `tts-engine-decision.md` for the current call — KokoClone and
+> XTTS v2 were both benchmarked and A/B'd; **KokoClone was chosen** (better
+> quality by ear, and its whole stack is MIT/Apache = commercial-safe), XTTS v2
+> rejected (non-commercial weights). This doc is kept for the model survey and
+> the reference-audio / preprocessing pipeline, which are still valid.
 
 ## Key finding: no training needed
 

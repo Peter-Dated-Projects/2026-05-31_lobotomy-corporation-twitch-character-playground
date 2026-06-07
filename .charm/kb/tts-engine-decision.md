@@ -1,5 +1,36 @@
 # TTS Engine Decision: voice-clone speak feature
 
+## DECISION (2026-06-07): KokoClone (Kokoro + Kanade VC)
+
+Chosen after spiking both KokoClone and XTTS v2 on the same hod reference clip
+and A/B listening to the outputs:
+
+- **Quality:** the KokoClone clone was clearly preferred over XTTS v2 by ear.
+- **License:** the full KokoClone stack is commercial-safe (verified below),
+  unlike XTTS v2 whose weights are non-commercial.
+
+XTTS v2 is rejected. Chatterbox/Zonos remain noted alternatives but are not
+needed -- KokoClone wins on quality and is already permissively licensed.
+
+### License verification (the whole stack is commercial-OK)
+
+| Component | License | Source |
+|---|---|---|
+| Kokoro (TTS front-end + ONNX weights) | Apache 2.0 | hexgrad/Kokoro |
+| Kanade tokenizer (the voice-conversion model + code) | **MIT** | frothywater/kanade-12.5hz + kanade-tokenizer (trained on LibriTTS) |
+| KokoClone (glue) | Apache 2.0 | Ashish-Patnaik/kokoclone |
+
+No non-commercial clause anywhere in the chain. Safe for a monetized stream.
+
+### Open items before/at build
+
+- GPU latency on the RTX 5070Ti still unverified (Mac CPU was RTF ~1.4x; see
+  table below). Confirm it clears real-time on the actual streaming PC.
+- The reference WAVs are 8-11 min raw dub audio with background score; trim to a
+  short clean segment (~10-15s) and denoise per character for a better VC target.
+
+---
+
 Consolidated spike results comparing voice-clone engines for the channel-points
 "speak through a robot" feature. Supersedes the engine recommendation in
 `voice-cloning-research.md` (which predates the runtime spikes).
@@ -68,13 +99,9 @@ Captured because the install is fragile:
   (needs ffmpeg on PATH) or install `coqui-tts[codec]`.
 - Set `COQUI_TOS_AGREED=1` for non-interactive model download (CPML prompt).
 
-## Recommendation
+## Outcome
 
-1. **If non-monetized hobby stream:** XTTS v2 is usable and quality is the only
-   open question -> judge the sample, then confirm GPU latency on the 5070Ti.
-2. **If monetized (or future-proofing the company angle):** do NOT ship XTTS v2.
-   Spike **Chatterbox (MIT)** next - same zero-shot cloning, faster, commercial-
-   safe. This is the recommended path given the entrepreneurial direction.
-3. KokoClone stays a fallback: Apache-licensed front-end but heavier per-utterance
-   VC and weaker latency than Chatterbox's claims; verify Kanade's license before
-   commercial use.
+KokoClone selected (see DECISION at top). XTTS v2 rejected on license; quality
+also favored KokoClone by ear. Chatterbox (MIT) / Zonos (Apache 2.0) are recorded
+as viable commercial-safe alternatives if KokoClone disappoints on GPU latency,
+but are not being pursued now.
