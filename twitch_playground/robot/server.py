@@ -16,10 +16,12 @@ Endpoints:
 
 from __future__ import annotations
 
-import hashlib
+import os
+import random
 import threading
 from pathlib import Path
 
+from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -43,9 +45,10 @@ class _EngineState:
         self.status = "loading"     # loading | ready | unavailable
         self.detail = ""            # human-readable error when unavailable
         self.device = ""            # cuda | mps | cpu, once known
-        # Who is speaking right now, for the optional renderer (frieren run robot)
-        # to draw the face. (character, text) or None. The renderer clears it when
-        # the engine stops speaking; harmless in headless robot-debug mode.
+        # The transient utterance for the renderer's speech balloon: (character,
+        # text) while speaking, cleared when the engine stops. Drives the balloon;
+        # the persistent robot body comes from server.current_face() so it stays
+        # on screen between utterances (see the voice-selection section).
         self.active = None          # tuple[str, str] | None
         self._lock = threading.Lock()
 
@@ -85,20 +88,124 @@ def _load_engine() -> None:
         )
 
 
+def _start_redemptions() -> None:
+    """Start the Twitch channel-point redemption listener (EventSub WebSocket).
+
+    A redemption's form text (``user_input``) is routed through the SAME speak
+    path as the web UI's /api/speak button -- see ``speak_text``. Disabled
+    silently if no Twitch credentials are configured.
+
+    Two optional reward ids (discovered from the redemption log) gate behaviour:
+      - ``TWITCH_REWARD_ID`` -- the TTS reward. Unset = every reward speaks; set =
+        only that reward speaks.
+      - ``TWITCH_REWARD_ID_COLOR_CHANGE`` -- the "Change Speaker" reward. When
+        set, the voice is locked to one current speaker (first utterance random,
+        reused after) and redeeming THIS reward re-rolls it to a DIFFERENT voice;
+        the renderer keeps that robot on screen between utterances. When unset,
+        each utterance is independently random.
+    """
+    global _COLOR_CHANGE_REWARD_ID
+
+    # The robot entry points don't load .env on their own (main.py does, for the
+    # playground); do it here so auth.ensure_access_token sees the credentials.
+    load_dotenv()
+    from twitch_playground.chat.eventsub import start_redemption_thread
+
+    tts_reward_id = (os.environ.get("TWITCH_REWARD_ID") or "").strip() or None
+    _COLOR_CHANGE_REWARD_ID = (
+        os.environ.get("TWITCH_REWARD_ID_COLOR_CHANGE") or ""
+    ).strip() or None
+
+    # Change Speaker mode: seed a current speaker now so a robot shows on screen
+    # immediately, and the first utterance speaks through this (random) voice.
+    if _COLOR_CHANGE_REWARD_ID is not None:
+        _reroll_speaker()
+
+    # Delivery filter (None = accept all rewards). With no TTS reward set we
+    # accept everything (TTS-for-all), which already includes the change-speaker
+    # reward. With one set, we must also let the change-speaker reward through.
+    if tts_reward_id is None:
+        reward_ids: set[str] | None = None
+    else:
+        reward_ids = {tts_reward_id}
+        if _COLOR_CHANGE_REWARD_ID is not None:
+            reward_ids.add(_COLOR_CHANGE_REWARD_ID)
+
+    def _on_redemption(user: str, text: str, rid: str, title: str) -> None:
+        # The Change Speaker reward re-rolls the locked voice; it never speaks.
+        if _COLOR_CHANGE_REWARD_ID is not None and rid == _COLOR_CHANGE_REWARD_ID:
+            new_voice = _reroll_speaker()
+            print(f"[robot] {user} redeemed {title!r} -> current speaker is now {new_voice}")
+            return
+        # Otherwise treat the redemption as a TTS message.
+        if not text.strip():
+            print(f"[eventsub] {user} redeemed {title!r} with no text; nothing to speak")
+            return
+        result = speak_text(text, author=user)
+        print(
+            f"[eventsub] -> speak({result.get('character')}): {result.get('note')} "
+            f"| said={result.get('filtered')!r}"
+        )
+
+    if start_redemption_thread(_on_redemption, reward_ids=reward_ids) is not None:
+        tts_scope = f"tts={tts_reward_id}" if tts_reward_id else "tts=ALL"
+        if _COLOR_CHANGE_REWARD_ID:
+            mode = f"change_speaker={_COLOR_CHANGE_REWARD_ID} (voice locked to {current_face()})"
+        else:
+            mode = "no change-speaker reward (voice random per utterance)"
+        print(f"[robot] redemption listener started -- {tts_scope}, {mode}")
+
+
 @app.on_event("startup")
 def _startup() -> None:
     threading.Thread(target=_load_engine, name="engine-load", daemon=True).start()
+    _start_redemptions()
 
 
-# --- voice pairing -----------------------------------------------------------
+# --- voice selection ----------------------------------------------------------
+# `_CURRENT_SPEAKER` is the voice last chosen, and the robot the renderer keeps on
+# screen after speaking. Two modes, by whether a "Change Speaker" reward id is set:
+#   - OFF (no TWITCH_REWARD_ID_COLOR_CHANGE): each utterance picks a NEW random
+#     voice, which becomes the on-screen face and stays until the next utterance.
+#   - ON: the speaker is LOCKED -- the first utterance seeds it at random, every
+#     later utterance reuses it, and a Change Speaker redemption re-rolls it to a
+#     different voice. The face persists between utterances either way.
+_SPEAKER_LOCK = threading.Lock()
+_COLOR_CHANGE_REWARD_ID: str | None = None  # set at startup from the env
+_CURRENT_SPEAKER: str | None = None           # voice last chosen == on-screen face
 
 
-def _pick_voice(username: str) -> str:
-    """Deterministic md5(username) -> roster voice. Mirrors sim.world.pick_voice
-    so a given username maps to the same Sephirah here as in the playground."""
-    roster = settings.ROBOT_ROSTER
-    digest = hashlib.md5((username or "anonymous").encode("utf-8")).hexdigest()
-    return roster[int(digest, 16) % len(roster)]
+def _random_voice() -> str:
+    return random.choice(settings.ROBOT_ROSTER)
+
+
+def _choose_voice() -> str:
+    """The voice for a TTS utterance, per the modes above. Always records the
+    chosen voice as `_CURRENT_SPEAKER` so the robot stays on screen after speaking;
+    in locked mode the speaker is seeded once and reused."""
+    global _CURRENT_SPEAKER
+    with _SPEAKER_LOCK:
+        if _COLOR_CHANGE_REWARD_ID is None or _CURRENT_SPEAKER is None:
+            _CURRENT_SPEAKER = _random_voice()
+        return _CURRENT_SPEAKER
+
+
+def _reroll_speaker() -> str:
+    """Lock in a NEW random current speaker (different from the current one when
+    possible) and return it. Triggered by a Change Speaker reward redemption,
+    and once at startup to seed the persistent face."""
+    global _CURRENT_SPEAKER
+    with _SPEAKER_LOCK:
+        others = [v for v in settings.ROBOT_ROSTER if v != _CURRENT_SPEAKER]
+        _CURRENT_SPEAKER = random.choice(others or list(settings.ROBOT_ROSTER))
+        return _CURRENT_SPEAKER
+
+
+def current_face() -> str | None:
+    """The robot the renderer keeps on screen between utterances: the voice last
+    chosen (or the locked speaker in Change Speaker mode). None only before the
+    first utterance in random mode."""
+    return _CURRENT_SPEAKER
 
 
 # --- API ---------------------------------------------------------------------
@@ -106,8 +213,8 @@ def _pick_voice(username: str) -> str:
 
 class SpeakRequest(BaseModel):
     text: str
-    character: str | None = None   # explicit voice, else paired from author
-    author: str = "webui"          # mock username for deterministic pairing
+    character: str | None = None   # explicit voice; if omitted, a random one is chosen
+    author: str = "webui"          # mock username (for logging; does not pick the voice)
 
 
 @app.get("/api/health")
@@ -118,6 +225,7 @@ def health() -> dict:
         "device": STATE.device,
         "roster": settings.ROBOT_ROSTER,
         "is_speaking": STATE.is_speaking(),
+        "speaker": current_face(),  # locked current speaker, or null in random mode
     }
 
 
@@ -126,17 +234,21 @@ def roster() -> dict:
     return {"roster": settings.ROBOT_ROSTER}
 
 
-@app.post("/api/speak")
-def speak(req: SpeakRequest) -> dict:
-    """Receive a mocked !say event: truncate, filter, pair a voice, and (when the
-    engine is ready) speak it. Always returns the filtered text + chosen voice so
-    the UI shows the result even in dry mode."""
-    text = (req.text or "").strip()[: settings.SPEAK_MAX_MESSAGE_LEN]
+def speak_text(text: str, *, character: str | None = None, author: str = "webui") -> dict:
+    """Truncate, filter, choose a voice, and (when the engine is ready) speak.
+
+    The voice is *character* if given (the web UI's per-Sephirah buttons), else a
+    random roster voice picked per utterance. Shared by the /api/speak web button
+    and the channel-point redemption listener so both drive the face identically.
+    Always returns the filtered text + chosen voice so the caller can report the
+    result even in dry mode. *author* is retained for logging only.
+    """
+    text = (text or "").strip()[: settings.SPEAK_MAX_MESSAGE_LEN]
     if not text:
         return {"ok": False, "error": "empty message"}
 
     filtered = filter_message(text)
-    character = req.character or _pick_voice(req.author)
+    character = character or _choose_voice()
     if character not in settings.ROBOT_ROSTER:
         return {"ok": False, "error": f"unknown character {character!r}"}
 
@@ -165,6 +277,12 @@ def speak(req: SpeakRequest) -> dict:
         "censored": filtered != text,
         "engine_status": STATE.status,
     }
+
+
+@app.post("/api/speak")
+def speak(req: SpeakRequest) -> dict:
+    """Receive a mocked !say event from the web UI and speak it."""
+    return speak_text(req.text, character=req.character, author=req.author)
 
 
 @app.get("/")

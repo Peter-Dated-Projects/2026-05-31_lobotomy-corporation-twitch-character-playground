@@ -23,6 +23,11 @@ dependencies = [
     "huggingface_hub>=0.25",
     "kanade-tokenizer @ git+https://github.com/frothywater/kanade-tokenizer",
     "better-profanity>=0.7",
+    # Voice-reference build tool used by scripts/setup_voices.py to download the
+    # Sephirah dub clips. Pip-installable (unlike ffmpeg, which stays a system
+    # tool on PATH); pinned here so `uv sync` provides it and the build script
+    # finds it on PATH under `uv run`.
+    "yt-dlp>=2024.8.6",
 ]
 
 [project.scripts]

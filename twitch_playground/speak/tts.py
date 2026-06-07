@@ -64,6 +64,7 @@ class SpeakEngine:
         self._is_speaking = False
         self._lock = threading.Lock()
         self._channel = None  # lazily reserved pygame mixer channel
+        self._volume = 1.0  # playback gain in [0, 1]; applied to the channel
 
         # Load the ML core. Import failures -> typed unavailability error.
         try:
@@ -110,6 +111,27 @@ class SpeakEngine:
         """True while a ``speak`` playback is in progress."""
         with self._lock:
             return self._is_speaking
+
+    @property
+    def volume(self) -> float:
+        """Current playback gain in [0.0, 1.0]."""
+        with self._lock:
+            return self._volume
+
+    def set_volume(self, volume: float) -> None:
+        """Set playback gain, clamped to [0.0, 1.0].
+
+        Applies to the live channel immediately (so a drag mid-utterance is
+        audible) and is re-applied to every future utterance in
+        :meth:`_play_blocking`. Thread-safe: callable from a UI/main thread
+        while playback runs on the worker thread.
+        """
+        vol = max(0.0, min(1.0, float(volume)))
+        with self._lock:
+            self._volume = vol
+            channel = self._channel
+        if channel is not None:
+            channel.set_volume(vol)
 
     def synthesize(self, text: str, character: str) -> tuple[np.ndarray, int]:
         """Synthesise *text* in *character*'s voice. Pure compute, no playback.
@@ -180,21 +202,40 @@ class SpeakEngine:
             pygame.mixer.set_num_channels(count + 1)
             self._channel = pygame.mixer.Channel(count)
 
-        sound = pygame.mixer.Sound(buffer=self._encode_wav(samples, sample_rate))
+        # Load via a WAV file object (not buffer=): SDL_mixer parses the header
+        # and resamples to the mixer's actual output format. buffer= would treat
+        # the bytes as raw PCM already in the mixer's format -- when the mixer was
+        # pre-initialized elsewhere (e.g. pygame.init() in the robot renderer opens
+        # it at 44.1kHz stereo) our ~24kHz mono samples would play ~1.8x too fast.
+        sound = pygame.mixer.Sound(file=io.BytesIO(self._encode_wav(samples, sample_rate)))
+        with self._lock:
+            self._channel.set_volume(self._volume)
         self._channel.play(sound)
         while self._channel.get_busy():
             pygame.time.wait(50)
 
-    @staticmethod
-    def _encode_wav(samples: np.ndarray, sample_rate: int) -> bytes:
+    # A short silence lead-in prepended to every clip before playback. The mixer
+    # consistently swallows the first few ms of a clip -- SDL_mixer resamples our
+    # ~24kHz mono audio up to its 44.1kHz stereo output and the hard onset at the
+    # WAV boundary loses its leading edge, and on a freshly-init'd device the first
+    # buffer is eaten entirely. Padding with silence means what gets clipped is the
+    # pad, never speech. ~120ms is inaudible as latency but covers both effects.
+    _LEAD_IN_SECONDS = 0.12
+
+    @classmethod
+    def _encode_wav(cls, samples: np.ndarray, sample_rate: int) -> bytes:
         """Encode float32 mono samples to an in-memory 16-bit PCM WAV.
 
         Going through a WAV buffer (rather than pygame.sndarray) avoids having
         to match the mixer's exact array format and is robust across mixer init.
+        A silence lead-in is prepended so the mixer's start-of-clip clipping eats
+        the pad instead of the first word (see :attr:`_LEAD_IN_SECONDS`).
         """
         import soundfile as sf
 
         clipped = np.clip(samples, -1.0, 1.0)
+        pad = np.zeros(int(cls._LEAD_IN_SECONDS * sample_rate), dtype=clipped.dtype)
+        padded = np.concatenate([pad, clipped])
         buf = io.BytesIO()
-        sf.write(buf, clipped, sample_rate, format="WAV", subtype="PCM_16")
+        sf.write(buf, padded, sample_rate, format="WAV", subtype="PCM_16")
         return buf.getvalue()

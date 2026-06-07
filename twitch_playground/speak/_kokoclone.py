@@ -254,9 +254,16 @@ def chunked_voice_conversion(
         )
         mel_parts.append(mel_chunk[..., left_trim:right_trim])
 
-        pos += chunk_samples
         if device.type == "cuda":
             torch.cuda.empty_cache()
+
+        # This chunk's window already reached the end, so it emitted [pos,
+        # n_samples] in full (right_trim kept everything). Stop here -- stepping
+        # pos += chunk_samples could land just short of n_samples and spawn one
+        # more chunk that re-emits the tail, duplicating the last words.
+        if win_end >= n_samples:
+            break
+        pos += chunk_samples
 
     full_mel = torch.cat(mel_parts, dim=-1).to(device)
     with torch.inference_mode():

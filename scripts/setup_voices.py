@@ -11,6 +11,10 @@ Two files are written per character into twitch_playground/assets/voices/:
   - <name>.wav       the trimmed reference the engine actually reads (~15s)
   - <name>.full.wav  the full concatenated dub audio, kept for re-trimming
 
+Trim region: a character listed in TRIM_REGIONS uses a hand-picked (start, end)
+window verbatim -- preferred, since the heuristic below mis-picks on some clips.
+Characters absent from TRIM_REGIONS fall back to the heuristic.
+
 Trim heuristic (deterministic, no model): split the full clip into 0.5s frames,
 compute each frame's RMS energy, mark a frame "voiced" when its RMS is above 40%
 of the clip's 90th-percentile frame RMS, then slide a 15s window (skipping the
@@ -97,6 +101,18 @@ CHARACTERS: dict[str, list[str]] = {
         "jVTv3rMzRBQ",  # Yesod 4
         "F8z1vath7-Y",  # yesod_from_lobotomies
     ],
+}
+
+# Hand-picked reference regions as (start_seconds, end_seconds) within each
+# <name>.full.wav, chosen by listening rather than trusting the energy heuristic.
+# When a character appears here its region is used verbatim; otherwise the build
+# falls back to _pick_clean_window. Re-derive these by cutting from the .full.wav
+# (which setup_voices keeps) and listening, then update the tuple here.
+TRIM_REGIONS: dict[str, tuple[float, float]] = {
+    "hod": (5.0, 35.0),
+    "malkuth": (3.0, 23.0),
+    "netzach": (15.0, 48.0),
+    "yesod": (0.0, 30.0),
 }
 
 
@@ -275,8 +291,14 @@ def build_character(name: str, video_ids: list[str], *, force: bool, denoise: bo
         print(f"  concat + resample -> {full_wav.name}")
         _concat_and_normalize(clip_wavs, full_wav)
 
-    start, dur = _pick_clean_window(full_wav)
-    print(f"  trim cleanest {dur:.0f}s window @ {start:.1f}s -> {out_wav.name}")
+    region = TRIM_REGIONS.get(name)
+    if region is not None:
+        start, end = region
+        dur = end - start
+        print(f"  trim hand-picked region {start:.0f}-{end:.0f}s -> {out_wav.name}")
+    else:
+        start, dur = _pick_clean_window(full_wav)
+        print(f"  trim cleanest {dur:.0f}s window @ {start:.1f}s -> {out_wav.name}")
     _trim(full_wav, out_wav, start, dur)
 
     if denoise:

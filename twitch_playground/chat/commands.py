@@ -15,13 +15,6 @@ class ChatCommand:
     author: str = ""
 
 
-# Speak-feature seam: the `!say <message>` command flows through this same
-# parser (cmd="say", the message is `" ".join(parsed.args)`) and is dispatched
-# by World._cmd_say. A future Twitch Channel-Points redemption source would
-# build the SAME ChatCommand(cmd="say", args=[...], author=...) and enqueue it on
-# the command queue -- no change to the parser or the world handler is needed,
-# only a new producer (EventSub channel-point redemption -> ChatCommand) feeding
-# the existing queue.
 def parse_command(content: str, author: str = "") -> ChatCommand | None:
     """Return a ChatCommand for a `!`-prefixed message, else None."""
     content = content.strip()

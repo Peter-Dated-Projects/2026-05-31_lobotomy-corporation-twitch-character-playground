@@ -195,21 +195,14 @@ NAMEPLATE_FONT_SIZE = 14
 NAMEPLATE_COLOR = (235, 235, 235)
 NAMEPLATE_OUTLINE = (0, 0, 0)
 
-# --- Speak feature -----------------------------------------------------------
-# A viewer's `!say <message>` is filtered, synthesized in a Sephirah's cloned
-# voice (TTS engine, on a background thread) and shown as a robot + speech
-# balloon overlay for the duration of playback. This block OWNS all speak config.
-#
-# SPEAK_ENABLED is OFF by default and opt-in via the env var: constructing the
-# engine loads heavy ML models (~25-30s) and pulls in torch, so we do not pay
-# that cost on every dev run. Set SPEAK_ENABLED=1 to turn it on. If the engine
-# is disabled here -- or its import / model load fails -- the app runs normally
-# without the feature (see main.py's guarded construction).
-SPEAK_ENABLED = os.environ.get("SPEAK_ENABLED", "0").strip().lower() in ("1", "true", "yes", "on")
+# --- Speak feature (robot TTS harness) ---------------------------------------
+# The playground game itself no longer speaks; the speak/TTS feature now lives
+# entirely in the robot harness (twitch_playground/robot/, `frieren run robot`).
+# These knobs configure that harness and the shared render.speech / speak modules.
 
-# The roster of Sephirah robots with a cloned reference voice. A viewer is
-# mapped to exactly one of these deterministically (md5(username), see
-# sim/world.pick_voice) so they always speak through the same character. Must
+# The roster of Sephirah robots with a cloned reference voice. A redeemer/author
+# is mapped to exactly one of these deterministically (md5(name), see
+# robot.server._pick_voice) so they always speak through the same character. Must
 # stay aligned with the reference WAVs under assets/voices/ and the robot art
 # under assets/robots/ (render/speech.ROSTER).
 ROBOT_ROSTER = ["hod", "malkuth", "netzach", "yesod"]

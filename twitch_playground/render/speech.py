@@ -120,7 +120,9 @@ def draw_speech(
     The robot body is drawn feet-anchored at ``anchor`` (midbottom, matching the
     scene's convention); ``anchor`` defaults to the bottom-center of the stage.
     A speech balloon holding the word-wrapped ``text`` is drawn above the robot's
-    head, horizontally centered on it and clamped inside the screen edges.
+    head, horizontally centered on it and clamped inside the screen edges. When
+    ``text`` is blank only the robot body is drawn (no balloon) -- used to keep a
+    persistent face on screen between utterances.
     """
     if anchor is None:
         anchor = (settings.SCREEN_W // 2, settings.SCREEN_H)
@@ -133,6 +135,9 @@ def draw_speech(
 
     robot_rect = robot.get_rect(midbottom=(ax, ay))
     screen.blit(robot, robot_rect)
+
+    if not text.strip():
+        return  # persistent face: robot only, no balloon
 
     balloon = _build_balloon(text, font)
     brect = balloon.get_rect()
