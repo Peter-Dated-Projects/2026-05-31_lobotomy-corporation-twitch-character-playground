@@ -12,21 +12,28 @@ English narration for all robot characters is available here. This is the **pref
 
 Only characters with English dub clips on the YouTube channel are included. Characters without one are excluded from the robot roster entirely — no fallback, no Korean clips.
 
-The final roster will be determined when the YouTube channel is checked against the known robot sprites. Confirmed robot sprites from the asset scan: Chesed, Binah, Gebura, Malkuth, Tiphereth A, Hod, Netzach, Yesod, Hokma (Chokmah).
+Channel checked against the robot sprites on 2026-06-07
+(https://www.youtube.com/@LoboCorpANV/videos, ~44 videos). Only four Sephirah
+have dedicated solo-speech clips. The "Day N" story videos are mixed narration
+and are not usable as clean per-character references. So the **buildable roster
+is 4, not 9** — `scripts/setup_voices.py` downloads exactly these:
 
-| Character | Voice character |
-|---|---|
-| Chesed | Warm, casual |
-| Binah | Cold, deliberate |
-| Gebura | Assertive, strong |
-| Malkuth | Soft, energetic |
-| Tiphereth A | Matter-of-fact |
-| Hod | Gentle, formal |
-| Netzach | Laid-back |
-| Yesod | Precise, formal |
-| Hokma (Chokmah) | Heavy, resigned |
+| Character | Voice character | Dub clips on channel | Buildable |
+|---|---|---|---|
+| Hod | Gentle, formal | Hod 1-4 + hod_imaginary_technique | YES |
+| Malkuth | Soft, energetic | Malkuth 1-4 + malkuth_email | YES |
+| Netzach | Laid-back | Netzach 1-4 | YES |
+| Yesod | Precise, formal | Yesod 1-4 + yesod_from_lobotomies | YES |
+| Chesed | Warm, casual | none | no |
+| Binah | Cold, deliberate | none | no |
+| Gebura | Assertive, strong | none | no |
+| Tiphereth A | Matter-of-fact | none | no |
+| Hokma (Chokmah) | Heavy, resigned | none | no |
 
-Characters not on the YouTube channel are dropped from the pool. The username hash picks from only the confirmed subset.
+The five without clips are dropped from the pool. The username hash picks from
+only the buildable subset (hod, malkuth, netzach, yesod). OPEN PRODUCT QUESTION:
+4 robots may feel thin — decide whether to source the other five elsewhere
+(other dub channels, generic neural voices) or ship with 4.
 
 ---
 
@@ -34,7 +41,7 @@ Characters not on the YouTube channel are dropped from the pool. The username ha
 
 The setup script (to be written) checks the YouTube channel for each character, downloads matching clips via yt-dlp, trims to clean solo speech, and stores as WAV in `assets/voices/` (gitignored, local only). Any character without a clip is excluded from `ROBOT_ROSTER` in settings.
 
-At speak time, the Kokoro pipeline receives the selected robot's voice embedding (extracted once from its reference WAV via KokoClone's ECAPA-TDNN encoder and cached at startup) and synthesizes the viewer's filtered message in that character's voice.
+At speak time, KokoClone synthesizes the filtered message with Kokoro (a preset voice) and then runs the Kanade voice-conversion model to re-voice it toward the selected robot's reference WAV. The reference clip is consumed per utterance, not pre-baked into an embedding (see voice-cloning-research.md "How KokoClone actually works"). Cache the loaded reference tensor per character at startup to avoid re-reading the WAV on every speak.
 
 Robot sprite <-> voice pairing uses the same username md5 hash that selects the robot body, applied against the confirmed roster — a viewer always speaks through the same Sephirah with the same voice.
 

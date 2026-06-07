@@ -38,21 +38,61 @@ FastAPI server, streaming PC calls `http://192.168.x.x:8000/speak` with the mess
 XTTS v2 is set aside: larger model, slower, unnecessary given the hardware.
 
 ```
-uv add kokoro soundfile torch
+uv add kokoro-onnx "misaki[en]" soundfile torch torchaudio huggingface_hub
+uv add "git+https://github.com/frothywater/kanade-tokenizer"
 brew install espeak-ng   # macOS; apt-get install espeak-ng on Linux
 ```
 
-KokoClone (community extension) adds zero-shot voice cloning via ECAPA-TDNN speaker encoder: provide reference WAV clips, extract a voice embedding (192-float numpy array), save as `<character>_profile.npy`. At runtime, load the profile and pass to the synthesis call. No gradient updates, no GPU.
+### How KokoClone actually works (verified by reading the source, 2026-06-07)
+
+CORRECTION: an earlier version of this doc described KokoClone as adding zero-shot
+cloning "via an ECAPA-TDNN speaker encoder" that produces a 192-float embedding
+cached once at startup. **That is wrong.** Reading `core/cloner.py` in
+`github.com/Ashish-Patnaik/kokoclone`, KokoClone is a **two-stage pipeline**:
+
+1. **Kokoro-ONNX synthesizes the text in a fixed preset voice** (English uses
+   `af_bella`). Kokoro itself does NOT clone — it has a fixed voice bank.
+2. **The Kanade voice-conversion model re-voices that audio** to match the
+   reference WAV (`frothywater/kanade-12.5hz` + a vocoder).
+
+There is no precomputed speaker embedding. The reference WAV is loaded and the
+Kanade VC pass runs on **every utterance** (chunked). The real cloning quality
+and the runtime cost both come from the Kanade VC step, not from Kokoro.
+
+Implication: this is RVC-style per-utterance voice conversion bolted onto a TTS
+front-end, NOT lightweight embedding-conditioned synthesis. The per-speak cost is
+`Kokoro synth + Kanade VC over the full output`. On the 5070Ti this is fine; the
+CPU-fallback latency is the open question (see Spike status below).
+
+Real API (`core/cloner.py`):
 
 ```python
-from kokoro import KPipeline
+from core.cloner import KokoClone
 
-pipeline = KPipeline(lang_code='en-us')  # load once at startup
-# per speak event:
-audio = pipeline(filtered_message, voice=speaker_embedding)
+cloner = KokoClone()          # loads Kanade + vocoder once; auto-detects CUDA/CPU
+# per speak event (reference WAV re-read each call unless we cache the loaded tensor):
+cloner.generate(
+    text=filtered_message,
+    lang="en",
+    reference_audio="assets/voices/<character>.wav",
+    output_path="out.wav",
+)
 ```
 
-Multiple reference clips per character = better profile. Extract 5-10 clean lines from the YouTube video, run the encoder over all of them, average the embeddings.
+Multiple reference clips per character still helps the VC target. We concatenate
+the dub clips per character in `scripts/setup_voices.py`, but a SHORT clean
+segment (~10-15s) is a better VC reference than the full 8-11 min raw clip —
+trim and denoise before using as the reference.
+
+### Spike status (2026-06-07)
+
+- [x] Architecture verified by source read (above) — KB corrected.
+- [x] Reference audio downloaded for hod/malkuth/netzach/yesod via `scripts/setup_voices.py`.
+- [ ] Runtime test (install KokoClone + Kanade, measure CPU latency, judge voice
+      likeness on our clips) — BLOCKED pending authorization to install the
+      `git+https` Kanade dependency and let it download model weights from
+      HuggingFace. This is the decision that picks Kokoro/KokoClone vs the XTTS v2
+      fallback.
 
 ---
 
