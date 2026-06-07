@@ -2,10 +2,22 @@
 """Build the Sephirah reference-voice WAV library for the robot speak feature.
 
 Downloads the English-dub character clips from the LoboCorpANV YouTube channel,
-concatenates the clips per character, and writes a single clean 24kHz mono WAV
-per character to twitch_playground/assets/voices/<name>.wav. Those WAVs are the
-reference audio that KokoClone's speaker encoder turns into a voice embedding at
-startup (see .charm/kb/voice-cloning-research.md and sephirah-voices.md).
+concatenates them per character, then TRIMS a short clean segment to use as the
+voice-conversion reference. The engine (KokoClone -> Kanade VC) re-reads this
+reference on every utterance, and a short clean clip (~15s of solo speech) is a
+better VC target than a long clip that still carries background score/SFX.
+
+Two files are written per character into twitch_playground/assets/voices/:
+  - <name>.wav       the trimmed reference the engine actually reads (~15s)
+  - <name>.full.wav  the full concatenated dub audio, kept for re-trimming
+
+Trim heuristic (deterministic, no model): split the full clip into 0.5s frames,
+compute each frame's RMS energy, mark a frame "voiced" when its RMS is above 40%
+of the clip's 90th-percentile frame RMS, then slide a 15s window (skipping the
+first ~5s of likely title music) in 0.5s steps and pick the window with the most
+summed voiced energy. This favors a stretch of near-continuous speech over one
+padded with pauses or quiet score. It is a heuristic, not VAD -- it picks the
+loudest sustained-speech window, which on these dub clips is reliably speech.
 
 The output directory is gitignored: these clips are derived from third-party
 video and are machine-local, not vendored art.
@@ -28,7 +40,10 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import wave
 from pathlib import Path
+
+import numpy as np
 
 # Repo layout: this file lives at <repo>/scripts/setup_voices.py
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -39,6 +54,12 @@ YOUTUBE_WATCH = "https://www.youtube.com/watch?v={id}"
 # Target reference-clip audio format. 24kHz mono matches Kokoro's expected
 # sample rate; s16 keeps the files small and universally readable.
 SAMPLE_RATE = 24000
+
+# Trim parameters for picking the short VC reference out of the full dub audio.
+TARGET_SECONDS = 15.0  # length of the trimmed reference clip
+INTRO_SKIP_SECONDS = 5.0  # skip likely title music at the very start
+FRAME_SECONDS = 0.5  # RMS analysis window
+VOICED_FRACTION = 0.40  # frame is "voiced" if RMS > this * 90th-pct frame RMS
 
 # Curated roster: only Sephirah with dedicated solo-speech clips on the channel.
 # The "Day N" story videos are mixed narration and are intentionally excluded.
@@ -149,6 +170,78 @@ def _concat_and_normalize(clip_wavs: list[Path], out_wav: Path) -> None:
         list_file.unlink(missing_ok=True)
 
 
+def _pick_clean_window(full_wav: Path) -> tuple[float, float]:
+    """Pick the cleanest sustained-speech window in `full_wav`.
+
+    Returns (start_seconds, duration_seconds). See the module docstring for the
+    heuristic. Deterministic: the same input always yields the same window.
+    Falls back to a fixed offset if the clip is too short or not 16-bit PCM.
+    """
+    with wave.open(str(full_wav), "rb") as w:
+        rate = w.getframerate()
+        n_channels = w.getnchannels()
+        sampwidth = w.getsampwidth()
+        raw = w.readframes(w.getnframes())
+
+    if sampwidth != 2:
+        # _concat_and_normalize always writes s16, so this is defensive only.
+        return (INTRO_SKIP_SECONDS, TARGET_SECONDS)
+
+    samples = np.frombuffer(raw, dtype=np.int16)
+    if n_channels > 1:
+        samples = samples[::n_channels]  # channel 0 only
+    total_sec = len(samples) / rate
+    if total_sec <= TARGET_SECONDS:
+        return (0.0, total_sec)  # whole clip is shorter than the target window
+
+    # Per-frame RMS energy over fixed FRAME_SECONDS windows.
+    frame_len = max(1, int(rate * FRAME_SECONDS))
+    n_frames = len(samples) // frame_len
+    frames = samples[: n_frames * frame_len].astype(np.float64).reshape(n_frames, frame_len)
+    rms = np.sqrt(np.mean(frames * frames, axis=1))
+
+    # Relative "voiced" threshold: tracks speech loudness, robust to overall gain.
+    voiced_threshold = VOICED_FRACTION * np.percentile(rms, 90)
+    voiced_energy = np.where(rms >= voiced_threshold, rms, 0.0)
+
+    # Slide a TARGET_SECONDS window in FRAME_SECONDS steps, skipping the intro,
+    # and maximize summed voiced energy (a rolling sum over consecutive frames).
+    window_frames = max(1, int(round(TARGET_SECONDS / FRAME_SECONDS)))
+    if window_frames >= n_frames:
+        return (0.0, total_sec)
+    cumsum = np.concatenate(([0.0], np.cumsum(voiced_energy)))
+    window_scores = cumsum[window_frames:] - cumsum[:-window_frames]
+
+    intro_frames = int(round(INTRO_SKIP_SECONDS / FRAME_SECONDS))
+    # Clamp the intro skip so a valid window always remains.
+    intro_frames = min(intro_frames, len(window_scores) - 1)
+    best = intro_frames + int(np.argmax(window_scores[intro_frames:]))
+    return (best * FRAME_SECONDS, TARGET_SECONDS)
+
+
+def _trim(full_wav: Path, out_wav: Path, start: float, dur: float) -> None:
+    """Cut [start, start+dur] from full_wav into out_wav at the reference format."""
+    _run(
+        [
+            "ffmpeg",
+            "-y",
+            "-ss",
+            f"{start:.3f}",
+            "-t",
+            f"{dur:.3f}",
+            "-i",
+            str(full_wav),
+            "-ar",
+            str(SAMPLE_RATE),
+            "-ac",
+            "1",
+            "-sample_fmt",
+            "s16",
+            str(out_wav),
+        ]
+    )
+
+
 def _denoise(wav: Path) -> None:
     """Optional deepfilternet pass to strip background score/SFX in place."""
     try:
@@ -164,7 +257,8 @@ def _denoise(wav: Path) -> None:
 
 
 def build_character(name: str, video_ids: list[str], *, force: bool, denoise: bool) -> None:
-    out_wav = VOICES_DIR / f"{name}.wav"
+    out_wav = VOICES_DIR / f"{name}.wav"  # short trimmed reference the engine reads
+    full_wav = VOICES_DIR / f"{name}.full.wav"  # full concat, kept for re-trimming
     if out_wav.exists() and not force:
         print(f"[{name}] exists, skipping (use --force to rebuild)")
         return
@@ -178,13 +272,18 @@ def build_character(name: str, video_ids: list[str], *, force: bool, denoise: bo
             print(f"  download {vid} -> {clip.name}")
             _download_clip(vid, clip)
             clip_wavs.append(clip)
-        print(f"  concat + resample -> {out_wav.name}")
-        _concat_and_normalize(clip_wavs, out_wav)
+        print(f"  concat + resample -> {full_wav.name}")
+        _concat_and_normalize(clip_wavs, full_wav)
+
+    start, dur = _pick_clean_window(full_wav)
+    print(f"  trim cleanest {dur:.0f}s window @ {start:.1f}s -> {out_wav.name}")
+    _trim(full_wav, out_wav, start, dur)
 
     if denoise:
+        # Denoise the SHORT reference, not the 8-11min full clip.
         print(f"  denoise {out_wav.name}")
         _denoise(out_wav)
-    print(f"[{name}] done -> {out_wav}")
+    print(f"[{name}] done -> {out_wav} (full clip kept at {full_wav.name})")
 
 
 def main() -> None:
