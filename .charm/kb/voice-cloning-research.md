@@ -27,6 +27,11 @@ Hardware: streaming PC has an RTX 5070Ti. Kokoro is an 82M parameter model — t
 
 **Kokoro** is the only model that fits. ~150ms per 10 seconds of synthesized output means a typical 5-word chat message synthesizes in under 50ms on CPU. Apache 2.0, no GPU required, no training.
 
+> NOTE (2026-06-07 spike): the ~150ms figure is for **bare Kokoro only**. The
+> cloning feature needs the full KokoClone pipeline (Kokoro + Kanade VC), which
+> measured **RTF ~1.4x on CPU** — slower than real-time. See "Spike status"
+> below. CPU is not a viable deployment path; GPU latency is still unmeasured.
+
 ## Deployment options
 
 **Option 1 (default): run Kokoro directly on the streaming PC.**
@@ -88,11 +93,36 @@ trim and denoise before using as the reference.
 
 - [x] Architecture verified by source read (above) — KB corrected.
 - [x] Reference audio downloaded for hod/malkuth/netzach/yesod via `scripts/setup_voices.py`.
-- [ ] Runtime test (install KokoClone + Kanade, measure CPU latency, judge voice
-      likeness on our clips) — BLOCKED pending authorization to install the
-      `git+https` Kanade dependency and let it download model weights from
-      HuggingFace. This is the decision that picks Kokoro/KokoClone vs the XTTS v2
-      fallback.
+- [x] Runtime test executed end-to-end (KokoClone + Kanade installed, ran on the
+      hod reference clip). It works — produced intelligible cloned speech.
+
+**Measured CPU latency (Apple Silicon Mac, `torch` CPU, no CUDA):**
+
+| Phase | Time |
+|---|---|
+| `KokoClone()` init (load Kanade + vocoder + WavLM) | ~29s (one-time, at startup) |
+| First `generate()` (downloads kokoro weights) | ~13s |
+| **Steady-state `generate()`** | **~8.5s for 6.0s of audio = RTF ~1.4x** |
+
+The Kanade voice-conversion pass dominates; this is NOT the "~150ms per 10s"
+Kokoro-alone figure quoted earlier in this doc — that number describes bare
+Kokoro and is misleading for the full KokoClone pipeline. **On CPU the pipeline
+is slower than real-time (~1.4x), so the CPU-fallback deployment path is not
+viable for a snappy speak feature.** A 5-10 word message would take ~5-10s on
+CPU before audio starts. The RTX 5070Ti is expected to bring this well under
+real-time, but that has NOT been measured yet (test ran on the Mac).
+
+Sample artifacts for listening (gitignored):
+`twitch_playground/assets/voices/_spike/hod_cloned_sample.wav` (cloned output)
+vs `_spike/hod_reference.wav` (target). Judge likeness before committing the
+roster to KokoClone.
+
+**Recommendation after spike:** KokoClone is functional and the architecture is
+sound, but two things must hold before adopting it: (1) GPU latency confirmed
+acceptable on the actual streaming PC (CPU is a no-go), and (2) the cloned
+output judged close enough to the target character. If GPU latency disappoints
+or likeness is weak, XTTS v2 remains the fallback (also a per-utterance cost,
+but a single-model zero-shot cloner rather than a TTS+VC chain).
 
 ---
 
