@@ -1,5 +1,12 @@
 # Voice Cloning Research: Sephirah TTS
 
+> SUPERSEDED IN PART (2026-06-07): the engine recommendation below (Kokoro +
+> KokoClone) predates the runtime spikes. See `tts-engine-decision.md` for the
+> current call — KokoClone and XTTS v2 were both benchmarked, XTTS v2 turned out
+> to be non-commercial-licensed, and Chatterbox (MIT) is now the recommended
+> path for a monetized stream. This doc is kept for the model survey and the
+> reference-audio / preprocessing pipeline, which are still valid.
+
 ## Key finding: no training needed
 
 Zero-shot voice cloning synthesizes in a target voice from a short reference clip at runtime — no training loop, no gradient updates. All viable options below support this. Fine-tuning only adds value with 15-60+ minutes of clean audio, which we won't have from the YouTube dub clips.
