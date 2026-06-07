@@ -80,6 +80,10 @@ class SpeakEngine:
             raise SpeakUnavailableError(
                 "torch / kanade / kokoro stack is not installed"
             ) from exc
+        except SpeakUnavailableError:
+            # Already a clear, typed failure (e.g. the GPU-required message from
+            # device selection) -- propagate as-is, do not re-wrap.
+            raise
         except Exception as exc:  # model download / init failure
             raise SpeakUnavailableError(f"failed to load speak models: {exc}") from exc
 

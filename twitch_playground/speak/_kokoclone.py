@@ -24,9 +24,15 @@ import shutil
 import tempfile
 import types
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import numpy as np
+
+# SpeakUnavailableError is defined in tts.py. tts imports KokoCloneCore lazily
+# (inside SpeakEngine.__init__), so importing the error here at module scope does
+# NOT create a cycle: whichever module loads first, the other's top level does
+# not import back into it.
+from .tts import SpeakUnavailableError
 
 # espeak-ng truncates its data path at an internal fixed buffer (~160 chars).
 # When the bundled espeak-ng-data sits under a deep venv path it silently falls
@@ -71,6 +77,97 @@ _KOKORO_VOICES = "voice/voices-v1.0.bin"
 # Fixed English preset voice the base TTS speaks in before voice conversion.
 _EN_VOICE = "af_bella"
 _EN_SPEED = 0.9
+
+
+# ---------------------------------------------------------------------------
+# Device selection
+# ---------------------------------------------------------------------------
+#
+# The speak pipeline runs faster than real-time only on a GPU. Plain `torch`
+# from PyPI installs a CPU-only wheel on Windows/Linux, so it is easy to end up
+# on CPU (RTF ~1.4, slower than real-time) without noticing. These helpers make
+# the device choice explicit, loud in stdout, and configurable via env:
+#
+#   SPEAK_DEVICE      cuda | mps | cpu | auto   (default auto = CUDA -> MPS -> CPU)
+#   SPEAK_REQUIRE_GPU truthy -> raise if no usable GPU instead of using CPU
+#
+# torch is passed in (not imported here) so this stays import-free and unit-
+# testable with a stub.
+
+_TRUTHY = frozenset({"1", "true", "yes", "on", "y", "t"})
+
+
+def _env_bool(value: str | None, *, default: bool = False) -> bool:
+    """Parse a boolean-ish env value (1/true/yes/on). Empty/None -> *default*."""
+    if value is None:
+        return default
+    value = value.strip().lower()
+    if value == "":
+        return default
+    return value in _TRUTHY
+
+
+def _resolve_device(
+    torch: Any,
+    *,
+    require_gpu: bool,
+    override: str | None,
+    log: Callable[[str], None] = print,
+) -> Any:
+    """Pick the compute device, preferring CUDA -> MPS -> CPU.
+
+    *override* (SPEAK_DEVICE) forces a specific backend: ``cuda``/``mps``/``cpu``,
+    or ``auto`` (default) for the preference order. Always logs the chosen device.
+
+    Raises :class:`SpeakUnavailableError` when the resolved device is CPU and
+    *require_gpu* is set, or when an explicit cuda/mps override is unavailable.
+    On CPU (allowed) it logs a prominent slow-path warning. Returns a
+    ``torch.device``. Note: MPS being *available* here does not guarantee the
+    models load on it -- :meth:`KokoCloneCore.load` wraps the MPS load and falls
+    back to CPU if it errors.
+    """
+    override = (override or "auto").strip().lower()
+    if override not in ("auto", "cuda", "mps", "cpu"):
+        log(f"[speak] WARNING: unknown SPEAK_DEVICE={override!r}; falling back to auto")
+        override = "auto"
+
+    cuda_ok = bool(torch.cuda.is_available())
+    mps_backend = getattr(torch.backends, "mps", None)
+    mps_ok = bool(mps_backend is not None and mps_backend.is_available())
+
+    if override == "cuda":
+        if not cuda_ok:
+            raise SpeakUnavailableError(
+                "SPEAK_DEVICE=cuda but CUDA is not available on this machine"
+            )
+        chosen = "cuda"
+    elif override == "mps":
+        if not mps_ok:
+            raise SpeakUnavailableError(
+                "SPEAK_DEVICE=mps but MPS is not available on this machine"
+            )
+        chosen = "mps"
+    elif override == "cpu":
+        chosen = "cpu"
+    elif cuda_ok:
+        chosen = "cuda"
+    elif mps_ok:
+        chosen = "mps"
+    else:
+        chosen = "cpu"
+
+    if chosen == "cpu":
+        if require_gpu:
+            raise SpeakUnavailableError(
+                "GPU required but none available; set SPEAK_REQUIRE_GPU=0 to allow CPU"
+            )
+        log(
+            "[speak] WARNING: no GPU -- running speak on CPU, which is SLOWER than "
+            "real-time (RTF ~1.4). Set SPEAK_REQUIRE_GPU=1 to fail loud instead."
+        )
+
+    log(f"[speak] device={chosen}")
+    return torch.device(chosen)
 
 
 # ---------------------------------------------------------------------------
@@ -215,22 +312,57 @@ class KokoCloneCore:
         self.sample_rate: int = 0
         self._loaded = False
 
-    def load(self, kanade_model: str = "frothywater/kanade-12.5hz") -> None:
-        """Load Kanade + vocoder + Kokoro once. Auto-detects CUDA, else CPU.
+    def _load_kanade(self, kanade_model: str) -> None:
+        """Load the Kanade voice-conversion model + vocoder onto ``self.device``.
 
-        Raises ImportError if the ML stack is not installed; the caller is
-        expected to translate that into a typed unavailability error.
+        Split out from :meth:`load` so the MPS-failure path can retry it on CPU.
         """
-        import torch
-        from huggingface_hub import hf_hub_download
         from kanade_tokenizer import KanadeModel, load_vocoder
-        from kokoro_onnx import EspeakConfig, Kokoro
-
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         self.kanade = KanadeModel.from_pretrained(kanade_model).to(self.device).eval()
         self.vocoder = load_vocoder(self.kanade.config.vocoder_name).to(self.device)
         self.sample_rate = self.kanade.config.sample_rate
+
+    def load(self, kanade_model: str = "frothywater/kanade-12.5hz") -> None:
+        """Load Kanade + vocoder + Kokoro once.
+
+        Device preference is CUDA -> MPS -> CPU, configurable via the
+        ``SPEAK_DEVICE`` and ``SPEAK_REQUIRE_GPU`` env vars (see
+        :func:`_resolve_device`). The selected device is logged at init.
+
+        MPS is untested for Kanade/Kokoro and torch's MPS backend has gaps, so an
+        MPS model-load failure falls back to CPU with a warning -- unless
+        ``SPEAK_REQUIRE_GPU`` is set, in which case it raises.
+
+        Raises ImportError if the ML stack is not installed (the caller turns that
+        into a typed unavailability error) and :class:`SpeakUnavailableError` when
+        a GPU is required but unavailable.
+        """
+        import torch
+        from huggingface_hub import hf_hub_download
+        from kokoro_onnx import EspeakConfig, Kokoro
+
+        require_gpu = _env_bool(os.environ.get("SPEAK_REQUIRE_GPU"), default=False)
+        override = os.environ.get("SPEAK_DEVICE")
+        self.device = _resolve_device(torch, require_gpu=require_gpu, override=override)
+
+        try:
+            self._load_kanade(kanade_model)
+        except Exception as exc:
+            # MPS is best-effort: torch's MPS backend has op coverage gaps, so a
+            # load failure there is expected to be recoverable on CPU.
+            if self.device.type != "mps":
+                raise
+            if require_gpu:
+                raise SpeakUnavailableError(
+                    f"SPEAK_REQUIRE_GPU=1 and MPS model load failed: {exc}"
+                ) from exc
+            print(
+                f"[speak] WARNING: MPS model load failed ({exc}); falling back to CPU"
+            )
+            self.device = torch.device("cpu")
+            print("[speak] device=cpu")
+            self._load_kanade(kanade_model)
 
         # Download into the HF cache (returns an absolute path); do NOT pollute
         # the working directory the way the upstream _ensure_file did.
