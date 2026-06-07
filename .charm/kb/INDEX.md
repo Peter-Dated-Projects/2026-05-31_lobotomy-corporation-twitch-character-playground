@@ -10,5 +10,5 @@ the KB. See `CONTRIBUTING.md` before adding or editing a note.
 | [architecture](architecture/_index.md) | 3 | How the system is built |
 | [decisions](decisions/_index.md)       | 8 | What we chose and why |
 | [conventions](conventions/_index.md)   | 1 | Repo patterns and idioms |
-| [gotchas](gotchas/_index.md)           | 18 | Traps and non-obvious constraints |
+| [gotchas](gotchas/_index.md)           | 20 | Traps and non-obvious constraints |
 | [domain](domain/_index.md)             | 4 | Glossary of project terms |

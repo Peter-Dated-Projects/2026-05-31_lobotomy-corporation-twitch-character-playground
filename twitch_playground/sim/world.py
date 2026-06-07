@@ -6,8 +6,11 @@ main drains here), so no locking is needed.
 
 from __future__ import annotations
 
+import hashlib
 import random
 import time
+from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import pygame
 from pygame.math import Vector2
@@ -20,14 +23,43 @@ from twitch_playground.sim.character import Character, Mode, Neighbor
 from twitch_playground.sim.personality import personality_for
 from twitch_playground.sim.platforms import default_level
 
+if TYPE_CHECKING:  # type-only; avoids importing the ML stack at module load
+    from twitch_playground.speak.tts import SpeakEngine
+
+
+@dataclass
+class SpeakState:
+    """The currently-speaking overlay: which roster robot, the (filtered) text
+    being spoken, and when it started. Set when a `!say` begins synthesis and
+    cleared by ``World.tick_speak`` once the engine reports playback finished."""
+
+    character: str
+    text: str
+    started: float
+
+
+def pick_voice(username: str) -> str:
+    """Map a viewer to one roster robot deterministically, so a given username
+    always speaks through the same Sephirah. Uses md5(username) modulo the
+    roster size -- stable across runs and independent of dict ordering."""
+    roster = settings.ROBOT_ROSTER
+    digest = hashlib.md5(username.encode("utf-8")).hexdigest()
+    return roster[int(digest, 16) % len(roster)]
+
 
 class World:
-    def __init__(self, provider: AssetProvider) -> None:
+    def __init__(self, provider: AssetProvider, speak_engine: "SpeakEngine | None" = None) -> None:
         self.provider = provider
         self.characters: dict[str, Character] = {}
         self.groups: dict[int, list[str]] = {}  # gid -> ordered members, [0] is anchor
         self._next_gid = 1
         self.platforms = default_level()  # index 0 is the full-width ground
+
+        # Speak feature: the (optional) TTS engine and the active overlay state.
+        # main.py constructs the engine once at startup and passes it in; when it
+        # is None (feature disabled or engine init failed) `!say` is a no-op.
+        self.speak_engine = speak_engine
+        self.active_speaker: SpeakState | None = None
 
         pygame.font.init()
         self._font = pygame.font.SysFont(None, settings.NAMEPLATE_FONT_SIZE)
@@ -46,6 +78,7 @@ class World:
             "leave": self._cmd_leave,
             "panic": self._cmd_panic,
             "cheer": self._cmd_cheer,
+            "say": self._cmd_say,
         }.get(cmd.cmd)
         if handler:
             return handler(cmd)
@@ -123,6 +156,59 @@ class World:
         out to that character's neighbours over the next frames."""
         name = normalize_target(cmd.args[0]) if cmd.args else cmd.author
         return self.characters.get(name)
+
+    # --- speak feature --------------------------------------------------------
+
+    def _cmd_say(self, cmd: ChatCommand) -> str | None:
+        """`!say <message>`: filter the message, synthesize it in the author's
+        assigned roster voice (on the engine's background thread), and raise the
+        robot + balloon overlay for the duration.
+
+        v0 overlap policy is ignore-if-busy: a new `!say` while one is already
+        playing is dropped (the simplest correct behaviour; a queue can come
+        later). Speaking is decoupled from the agent sim -- the viewer need not
+        have `!join`ed; the robot body is a separate Sephirah visual, not their
+        on-screen chibi.
+        """
+        if self.speak_engine is None:
+            return None  # feature disabled or engine unavailable
+        if self.active_speaker is not None:
+            return None  # ignore-if-busy: one utterance at a time (v0)
+
+        text = " ".join(cmd.args).strip()
+        if not text:
+            return None
+        text = text[: settings.SPEAK_MAX_MESSAGE_LEN]
+
+        # Lazy import: keeps World importable when the (optional) speak deps are
+        # absent, and is only reached once an engine is actually present.
+        from twitch_playground.speak.filter import filter_message
+
+        filtered = filter_message(text)
+        character = pick_voice(cmd.author or "anonymous")
+        try:
+            # Non-blocking: synthesis + playback run on a daemon thread inside the
+            # engine, so the sim/render loop is never stalled.
+            self.speak_engine.speak(filtered, character)
+        except Exception as exc:  # engine refused this utterance; skip, don't crash
+            print(f"[world] speak failed, skipping utterance: {exc}")
+            return None
+        self.active_speaker = SpeakState(character, filtered, time.monotonic())
+        return None
+
+    def tick_speak(self) -> None:
+        """Clear the active-speaker overlay once playback has finished.
+
+        Polls the engine's ``is_speaking`` flag from the main thread every frame
+        rather than clearing from the engine's background ``on_done`` callback --
+        World is main-thread-only, so mutating ``active_speaker`` off-thread would
+        be a data race. ``speak()`` sets ``is_speaking`` True synchronously before
+        returning, so there is no window where we clear an overlay we just set.
+        """
+        if self.active_speaker is None:
+            return
+        if self.speak_engine is None or not self.speak_engine.is_speaking:
+            self.active_speaker = None
 
     # --- spawning / despawning ------------------------------------------------
 

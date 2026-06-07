@@ -19,9 +19,36 @@ from twitch_playground import settings
 from twitch_playground.chat.bot import start_chat_thread
 from twitch_playground.chat.commands import ChatCommand
 from twitch_playground.dev import HELP, DevInjector, make_provider
-from twitch_playground.render import hud, scene
+from twitch_playground.render import hud, scene, speech
 from twitch_playground.render.background import Background
 from twitch_playground.sim.world import World
+
+
+def _make_speak_engine():
+    """Construct the speak TTS engine once at startup, degrading gracefully.
+
+    Loading the engine pulls in the ML stack and its models (~25-30s), so it is
+    opt-in via SPEAK_ENABLED. If the feature is disabled, the import fails (deps
+    absent), or model/voice load fails, we log one clear line and return None --
+    the app then runs normally with the speak feature inert (`!say` is a no-op).
+    """
+    if not settings.SPEAK_ENABLED:
+        print("[main] speak feature disabled (set SPEAK_ENABLED=1 to enable)")
+        return None
+    try:
+        from twitch_playground.speak.tts import SpeakEngine, SpeakEngineError
+    except Exception as exc:  # optional deps not importable
+        print(f"[main] speak feature unavailable (import failed): {exc}")
+        return None
+    try:
+        engine = SpeakEngine(
+            voices_dir=settings.SPEAK_VOICES_DIR, roster=settings.ROBOT_ROSTER
+        )
+    except SpeakEngineError as exc:
+        print(f"[main] speak feature disabled (engine init failed): {exc}")
+        return None
+    print("[main] speak engine ready")
+    return engine
 
 
 def main() -> None:
@@ -42,8 +69,10 @@ def main() -> None:
 
     # provider and backdrop must be built after the display exists
     # (convert_alpha / image.load need a video mode)
-    world = World(make_provider())
+    world = World(make_provider(), speak_engine=_make_speak_engine())
     background = Background((settings.SCREEN_W, settings.SCREEN_H))
+    # Font for the speak balloon text (built once; reused every frame).
+    speak_font = pygame.font.SysFont(None, settings.SPEAK_FONT_SIZE)
     command_queue: "queue.Queue[ChatCommand]" = queue.Queue()
 
     if start_chat_thread(command_queue) is not None:
@@ -93,9 +122,22 @@ def main() -> None:
 
         world.update(dt)
         world.tick_despawn(time.monotonic())
+        world.tick_speak()  # clear the speak overlay once playback finishes
         background.update(dt)
         background.draw(stage)  # owns the base fill; clears last frame
         scene.draw(stage, world)
+
+        # Speak overlay: a robot body + speech balloon for the active utterance,
+        # drawn over the scene (and under the debug HUD) for the duration of
+        # playback. tick_speak() above clears active_speaker when audio ends.
+        if world.active_speaker is not None:
+            speech.draw_speech(
+                stage,
+                character=world.active_speaker.character,
+                text=world.active_speaker.text,
+                font=speak_font,
+            )
+
         if hud_visible:
             hud.draw(stage, world, recent_commands)
 
