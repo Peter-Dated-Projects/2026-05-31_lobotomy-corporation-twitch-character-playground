@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Robot TTS — test panel</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 24px;
+    font: 15px/1.5 ui-sans-serif, system-ui, -apple-system, sans-serif;
+    background: #15161a; color: #e6e6e6;
+    max-width: 720px; margin-inline: auto;
+  }
+  h1 { font-size: 19px; margin: 0 0 4px; }
+  .sub { color: #8a8f98; margin: 0 0 20px; font-size: 13px; }
+  .card { background: #1d1f25; border: 1px solid #2a2d35; border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+  label { display: block; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: #8a8f98; margin-bottom: 6px; }
+  input[type=text], select {
+    width: 100%; padding: 9px 11px; border-radius: 7px;
+    border: 1px solid #353944; background: #121317; color: #e6e6e6; font: inherit;
+  }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: end; }
+  .row > div { flex: 1; min-width: 140px; }
+  button {
+    padding: 9px 14px; border-radius: 7px; border: 1px solid #3a3f4b;
+    background: #2a2e38; color: #e6e6e6; font: inherit; cursor: pointer;
+  }
+  button:hover { background: #343a46; }
+  button.primary { background: #e76d5a; border-color: #e76d5a; color: #1a1109; font-weight: 600; }
+  button.primary:hover { background: #f07d6b; }
+  .presets { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+  .presets button { font-size: 13px; padding: 6px 10px; }
+  .status { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: #6b7280; }
+  .dot.ready { background: #4ade80; } .dot.loading { background: #fbbf24; } .dot.unavailable { background: #f87171; }
+  #log { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; white-space: pre-wrap; max-height: 260px; overflow-y: auto; }
+  .logline { padding: 4px 0; border-bottom: 1px solid #23262e; }
+  .logline.err { color: #f87171; } .logline.ok { color: #9fe6b0; } .muted { color: #8a8f98; }
+</style>
+</head>
+<body>
+  <h1>Robot TTS — test panel</h1>
+  <p class="sub">Fires mocked <code>!say</code> events at the backend. No face / playground rendering — just the logic behind it.</p>
+
+  <div class="card">
+    <div class="status"><span id="dot" class="dot loading"></span><span id="statustext">checking engine…</span></div>
+  </div>
+
+  <div class="card">
+    <div class="row">
+      <div style="flex: 3">
+        <label for="text">Message</label>
+        <input id="text" type="text" placeholder="Type what the robot should say…" value="Hey chat, thanks for the channel points!" />
+      </div>
+      <div style="flex: 1">
+        <label for="voice">Voice</label>
+        <select id="voice"><option value="">auto (by author)</option></select>
+      </div>
+    </div>
+    <div class="row" style="margin-top: 12px">
+      <div style="flex: 2">
+        <label for="author">Mock author (drives auto voice)</label>
+        <input id="author" type="text" value="webui" />
+      </div>
+      <div style="flex: 0 0 auto; align-self: end">
+        <button class="primary" id="say">Speak</button>
+      </div>
+    </div>
+    <div class="presets">
+      <button data-msg="Hello everyone, welcome to the stream!">greeting</button>
+      <button data-msg="GG that was an insane play">short</button>
+      <button data-msg="What the hell is going on h3ll f*ck">profanity (filter test)</button>
+      <button data-msg="This is a much longer message that should exercise the balloon wrapping and the synthesis time on a fuller sentence than usual.">long</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <label>Response log</label>
+    <div id="log"></div>
+  </div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const log = (msg, cls = "") => {
+  const el = document.createElement("div");
+  el.className = "logline " + cls;
+  el.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+  $("log").prepend(el);
+};
+
+async function refreshHealth() {
+  try {
+    const h = await (await fetch("/api/health")).json();
+    $("dot").className = "dot " + h.status;
+    let t = `engine: ${h.status}`;
+    if (h.device) t += ` · device=${h.device}`;
+    if (h.is_speaking) t += " · speaking…";
+    if (h.status === "unavailable" && h.detail) t += ` · ${h.detail}`;
+    if (h.status === "loading") t += " (loading models, ~25-30s on first run)";
+    $("statustext").textContent = t;
+    // populate voice dropdown once
+    const sel = $("voice");
+    if (sel.options.length <= 1 && h.roster) {
+      h.roster.forEach((r) => { const o = document.createElement("option"); o.value = r; o.textContent = r; sel.appendChild(o); });
+    }
+  } catch (e) { $("statustext").textContent = "backend unreachable"; $("dot").className = "dot unavailable"; }
+}
+
+async function sendSpeak(text) {
+  const body = { text, character: $("voice").value || null, author: $("author").value || "webui" };
+  log(`POST /api/speak  ${JSON.stringify(body)}`, "muted");
+  try {
+    const r = await (await fetch("/api/speak", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    })).json();
+    if (!r.ok) { log(`error: ${r.error}`, "err"); return; }
+    const censored = r.censored ? "  (censored)" : "";
+    log(`→ ${r.character}: "${r.filtered}"${censored}  [${r.note}]`, r.spoke ? "ok" : "");
+  } catch (e) { log(`request failed: ${e}`, "err"); }
+}
+
+$("say").addEventListener("click", () => sendSpeak($("text").value));
+$("text").addEventListener("keydown", (e) => { if (e.key === "Enter") sendSpeak($("text").value); });
+document.querySelectorAll(".presets button").forEach((b) =>
+  b.addEventListener("click", () => { $("text").value = b.dataset.msg; sendSpeak(b.dataset.msg); }));
+
+refreshHealth();
+setInterval(refreshHealth, 2000);
+</script>
+</body>
+</html>
