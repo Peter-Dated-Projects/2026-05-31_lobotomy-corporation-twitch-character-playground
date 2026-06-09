@@ -12,7 +12,7 @@ VOICES_DIR="$ROOT/twitch_playground/assets/voices"
 # Prebuilt reference voice clips, published as a GitHub release asset so a fresh
 # machine can bootstrap without yt-dlp + YouTube + ffmpeg. Bump the tag here when
 # the clips are rebuilt (see scripts/setup_voices.py + './frieren.sh voices').
-VOICES_RELEASE_URL="https://github.com/Peter-Dated-Projects/2026-05-31_lobotomy-corporation-twitch-character-playground/releases/download/voices-v1/voices.zip"
+VOICES_RELEASE_URL="https://github.com/Peter-Dated-Projects/2026-05-31_lobotomy-corporation-twitch-character-playground/releases/download/voices-v2/voices-v2.zip"
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -116,8 +116,8 @@ cmd_run() {
             uv run playground
             ;;
         robot)
-            # The robot face renderer: a pygame window drawing only the speaking
-            # Sephirah + balloon, with the speak backend on a background thread.
+            # The Sephirah face renderer: shows a portrait of the active character
+            # that bobs while speaking, with the speak backend on a background thread.
             # Open the control panel URL it prints to drive it.
             echo "==> Running robot renderer (+ control panel backend)..."
             uv run --group robot robot
@@ -128,16 +128,8 @@ cmd_run() {
             echo "==> Running robot debug control panel (headless)..."
             uv run --group robot robot-debug
             ;;
-        sephirah)
-            # Sephirah character renderer: shows a full-screen portrait of
-            # Angela/Hod/Yesod/Netzach/Malkuth that bobs while speaking, plus a
-            # speech balloon. Open the control panel URL it prints to pick a
-            # character + speak.
-            echo "==> Running Sephirah character renderer (+ control panel backend)..."
-            uv run --group robot python -m twitch_playground.robot.sephirah_renderer
-            ;;
         *)
-            echo "Usage: ./frieren.sh run playground|robot|robot-debug|sephirah" >&2
+            echo "Usage: ./frieren.sh run playground|robot|robot-debug" >&2
             return 1
             ;;
     esac
@@ -221,7 +213,6 @@ Setup done. Next steps:
       ./frieren.sh voices           (rebuild from source; needs yt-dlp + ffmpeg)
   - Run the game:        ./frieren.sh run playground
   - Run the robot face:       ./frieren.sh run robot
-  - Run the Sephirah faces:   ./frieren.sh run sephirah
   - Run the web panel:        ./frieren.sh run robot-debug
 EOF
 }
@@ -257,9 +248,8 @@ Usage: ./frieren.sh <command>
 
 Commands:
   run playground            Run the full pygame playground
-  run robot                 Run the robot face renderer + control-panel backend
+  run robot                 Run the Sephirah face renderer + control-panel backend
   run robot-debug           Run the headless web control panel only
-  run sephirah              Run the Sephirah character renderer (named faces + mouth anim)
   voices --fetch            Download prebuilt reference voice clips (no yt-dlp/ffmpeg)
   voices [args]             Build reference voices from source (passes args to setup_voices.py)
   setup                     First-run setup (uv sync --group robot)

@@ -28,12 +28,13 @@ dependencies = [
     # tool on PATH); pinned here so `uv sync` provides it and the build script
     # finds it on PATH under `uv run`.
     "yt-dlp>=2024.8.6",
+    "pyloudnorm>=0.1",
 ]
 
 [project.scripts]
 playground = "twitch_playground.main:main"
-robot = "twitch_playground.robot.renderer:main"          # face renderer + backend
-robot-debug = "twitch_playground.robot.server:main"      # headless web control panel
+robot = "twitch_playground.robot.sephirah_renderer:main"       # face renderer + backend
+robot-debug = "twitch_playground.robot.server:main"            # headless web control panel
 
 [dependency-groups]
 dev = ["pytest>=8"]

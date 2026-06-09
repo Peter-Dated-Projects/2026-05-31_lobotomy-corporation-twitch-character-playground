@@ -200,7 +200,7 @@ NAMEPLATE_OUTLINE = (0, 0, 0)
 # entirely in the robot harness (twitch_playground/robot/, `frieren run robot`).
 # These knobs configure that harness and the shared render.speech / speak modules.
 
-# The roster of Sephirah robots with a cloned reference voice. A redeemer/author
+# The roster of Sephirah characters with a cloned reference voice. A redeemer/author
 # is mapped to exactly one of these deterministically (md5(name), see
 # robot.server._pick_voice) so they always speak through the same character. Must
 # stay aligned with the reference WAVs under assets/voices/ and the robot art
@@ -211,11 +211,11 @@ ROBOT_ROSTER = ["angela", "hod", "malkuth", "netzach", "yesod"]
 # default; kept here so the feature's config lives in one place.
 SPEAK_VOICES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "voices")
 
-# Balloon text font size and the cap on a spoken message's length (longer
-# messages are truncated before filtering/synthesis to bound synth time and
-# balloon size; the balloon renderer also ellipsizes overflow past its line cap).
+# Balloon text font size and the cap on a spoken message's length in words
+# (longer messages are truncated before filtering/synthesis to bound synth time
+# and balloon size; the balloon renderer also ellipsizes overflow past its line cap).
 SPEAK_FONT_SIZE = 16
-SPEAK_MAX_MESSAGE_LEN = 200
+SPEAK_MAX_WORDS = 100
 
 # --- LobCorp sprite assets ---------------------------------------------------
 # Root of the extracted sprite-sheet drop. The sheets the renderer actually uses

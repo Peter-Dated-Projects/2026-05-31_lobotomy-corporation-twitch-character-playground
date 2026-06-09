@@ -1247,6 +1247,19 @@ wheels = [
 ]
 
 [[package]]
+name = "pyloudnorm"
+version = "0.2.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+    { name = "scipy" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/23/00/f915eaa75326f4209941179c2b93ac477f2040e4aeff5bb21d16eb8058f9/pyloudnorm-0.2.0.tar.gz", hash = "sha256:8bf597658ea4e1975c275adf490f6deb5369ea409f2901f939915efa4b681b16", size = 14037, upload-time = "2026-01-04T11:43:35.265Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/aa/b6/65a49a05614b2548edbba3aab118f2ebe7441dfd778accdcdce9f6567f20/pyloudnorm-0.2.0-py3-none-any.whl", hash = "sha256:9bb69afb904f59d007a7f9ba3d75d16fb8aeef35c44d6df822a9f192d69cf13f", size = 10879, upload-time = "2026-01-04T11:43:34.534Z" },
+]
+
+[[package]]
 name = "pyparsing"
 version = "3.3.2"
 source = { registry = "https://pypi.org/simple" }
@@ -1805,6 +1818,7 @@ dependencies = [
     { name = "numpy" },
     { name = "pillow" },
     { name = "pygame-ce" },
+    { name = "pyloudnorm" },
     { name = "python-dotenv" },
     { name = "scipy" },
     { name = "soundfile" },
@@ -1821,7 +1835,7 @@ dependencies = [
 dev = [
     { name = "pytest" },
 ]
-robot = [
+sephirah = [
     { name = "fastapi" },
     { name = "uvicorn" },
 ]
@@ -1836,6 +1850,7 @@ requires-dist = [
     { name = "numpy", specifier = ">=1.24" },
     { name = "pillow", specifier = ">=10" },
     { name = "pygame-ce", specifier = ">=2.4" },
+    { name = "pyloudnorm", specifier = ">=0.1" },
     { name = "python-dotenv", specifier = ">=1.0" },
     { name = "scipy", specifier = ">=1.10" },
     { name = "soundfile", specifier = ">=0.12" },
@@ -1850,7 +1865,7 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [{ name = "pytest", specifier = ">=8" }]
-robot = [
+sephirah = [
     { name = "fastapi", specifier = ">=0.110" },
     { name = "uvicorn", specifier = ">=0.29" },
 ]

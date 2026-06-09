@@ -366,7 +366,7 @@ class KokoCloneCore:
         self.vocoder = load_vocoder(self.kanade.config.vocoder_name).to(self.device)
         self.sample_rate = self.kanade.config.sample_rate
 
-    def load(self, kanade_model: str = "frothywater/kanade-12.5hz") -> None:
+    def load(self, kanade_model: str = "frothywater/kanade-25hz") -> None:
         """Load Kanade + vocoder + Kokoro once.
 
         Device preference is CUDA -> MPS -> CPU, configurable via the

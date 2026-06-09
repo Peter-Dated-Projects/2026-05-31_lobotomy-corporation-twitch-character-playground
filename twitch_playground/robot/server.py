@@ -280,7 +280,8 @@ def speak_text(text: str, *, character: str | None = None, author: str = "webui"
     Always returns the filtered text + chosen voice so the caller can report the
     result even in dry mode. *author* is retained for logging only.
     """
-    text = (text or "").strip()[: settings.SPEAK_MAX_MESSAGE_LEN]
+    words = (text or "").strip().split()
+    text = " ".join(words[: settings.SPEAK_MAX_WORDS])
     if not text:
         return {"ok": False, "error": "empty message"}
 

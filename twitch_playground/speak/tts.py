@@ -29,23 +29,50 @@ DEFAULT_ROSTER = ("angela", "hod", "malkuth", "netzach", "yesod")
 # Reference clips live alongside the package assets: assets/voices/<name>.<ext>.
 _DEFAULT_VOICES_DIR = Path(__file__).resolve().parent.parent / "assets" / "voices"
 
-# Accepted reference-clip container formats, in preference order. The reference
-# library is built as MP3 by setup_voices.py; WAV/FLAC are also accepted so
-# existing lossless clips keep working without a rebuild.
-_REFERENCE_EXTS = (".mp3", ".wav", ".flac", ".ogg")
+# Accepted reference-clip container formats, in preference order. WAV is
+# preferred; MP3 is used as a fallback if no lossless file exists.
+_REFERENCE_EXTS = (".wav", ".flac", ".mp3", ".ogg")
 
 
 def _resolve_reference(voices_dir: Path, name: str) -> Path | None:
     """Return the reference clip for *name* under *voices_dir*, or None.
 
-    Tries each extension in :data:`_REFERENCE_EXTS` order so a lossless clip
-    wins over a lossy one when both exist.
+    Priority: lossless (.wav, .flac) > full concat dub (<name>.full.mp3) >
+    short trimmed clip (.mp3) > .ogg. The full concat dub, produced by
+    setup_voices.py and kept alongside the trimmed clip, gives kanade a longer
+    reference window and is preferred when available.
     """
-    for ext in _REFERENCE_EXTS:
+    for ext in (".wav", ".flac"):
+        candidate = voices_dir / f"{name}{ext}"
+        if candidate.is_file():
+            return candidate
+    full_clip = voices_dir / f"{name}.full.mp3"
+    if full_clip.is_file():
+        return full_clip
+    for ext in (".mp3", ".ogg"):
         candidate = voices_dir / f"{name}{ext}"
         if candidate.is_file():
             return candidate
     return None
+
+
+def _normalize_loudness(
+    samples: np.ndarray, sample_rate: int, target_lufs: float = -23.0
+) -> np.ndarray:
+    """Normalize *samples* to *target_lufs* using ITU-R BS.1770-4.
+
+    Returns *samples* unchanged if pyloudnorm is not installed or the clip is
+    silent (integrated loudness is -inf).
+    """
+    try:
+        import pyloudnorm as pyln
+    except ImportError:
+        return samples
+    meter = pyln.Meter(sample_rate)
+    loudness = meter.integrated_loudness(samples)
+    if loudness == float("-inf"):
+        return samples
+    return pyln.normalize.loudness(samples, loudness, target_lufs)
 
 
 class SpeakEngineError(Exception):
@@ -116,6 +143,7 @@ class SpeakEngine:
                 raise MissingReferenceError(
                     f"reference voice not found: {self.voices_dir / name}.({exts})"
                 )
+            print(f"[speak] {name}: using reference {ref.name} ({ref.suffix})")
             try:
                 self._references[name] = self._core.load_reference(ref)
             except Exception as exc:
@@ -183,6 +211,7 @@ class SpeakEngine:
             )
         base_samples, base_sr = self._core.synth_base(text)
         converted = self._core.convert(base_samples, base_sr, ref)
+        converted = _normalize_loudness(converted, self.sample_rate)
         return converted, self.sample_rate
 
     def speak(
