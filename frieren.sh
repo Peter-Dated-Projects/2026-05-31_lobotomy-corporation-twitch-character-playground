@@ -8,6 +8,11 @@ cd "$ROOT"
 export PYTHONUNBUFFERED=1
 
 ENV_FILE="$ROOT/.env"
+VOICES_DIR="$ROOT/twitch_playground/assets/voices"
+# Prebuilt reference voice clips, published as a GitHub release asset so a fresh
+# machine can bootstrap without yt-dlp + YouTube + ffmpeg. Bump the tag here when
+# the clips are rebuilt (see scripts/setup_voices.py + './frieren.sh voices').
+VOICES_RELEASE_URL="https://github.com/Peter-Dated-Projects/2026-05-31_lobotomy-corporation-twitch-character-playground/releases/download/voices-v1/voices.zip"
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -68,6 +73,35 @@ _set_env_var() {
     mv "$tmp" "$ENV_FILE"
 }
 
+# Download the prebuilt reference voice clips from the GitHub release and unzip
+# them into VOICES_DIR. Lets a fresh machine bootstrap voices without yt-dlp +
+# YouTube + ffmpeg. Returns non-zero (without exiting the script) on any failure
+# so callers can fall back to the from-source build.
+_fetch_voices() {
+    local tmp
+    if ! command -v unzip >/dev/null 2>&1; then
+        echo "    error: 'unzip' not found on PATH -- cannot install prebuilt clips." >&2
+        return 1
+    fi
+    mkdir -p "$VOICES_DIR"
+    tmp="$(mktemp -d)"
+    echo "    downloading prebuilt voice clips..."
+    if command -v curl >/dev/null 2>&1; then
+        curl -fsSL "$VOICES_RELEASE_URL" -o "$tmp/voices.zip" || {
+            echo "    error: download failed ($VOICES_RELEASE_URL)." >&2; rm -rf "$tmp"; return 1; }
+    elif command -v wget >/dev/null 2>&1; then
+        wget -q "$VOICES_RELEASE_URL" -O "$tmp/voices.zip" || {
+            echo "    error: download failed ($VOICES_RELEASE_URL)." >&2; rm -rf "$tmp"; return 1; }
+    else
+        echo "    error: neither curl nor wget found on PATH." >&2; rm -rf "$tmp"; return 1
+    fi
+    if ! unzip -o -q "$tmp/voices.zip" -d "$VOICES_DIR"; then
+        echo "    error: unzip failed." >&2; rm -rf "$tmp"; return 1
+    fi
+    rm -rf "$tmp"
+    echo "    voice clips installed -> $VOICES_DIR"
+}
+
 # ---------------------------------------------------------------------------
 # Commands
 # ---------------------------------------------------------------------------
@@ -94,8 +128,16 @@ cmd_run() {
             echo "==> Running robot debug control panel (headless)..."
             uv run --group robot robot-debug
             ;;
+        sephirah)
+            # Sephirah character renderer: shows a full-screen portrait of
+            # Angela/Hod/Yesod/Netzach/Malkuth that bobs while speaking, plus a
+            # speech balloon. Open the control panel URL it prints to pick a
+            # character + speak.
+            echo "==> Running Sephirah character renderer (+ control panel backend)..."
+            uv run --group robot python -m twitch_playground.robot.sephirah_renderer
+            ;;
         *)
-            echo "Usage: ./frieren.sh run playground|robot|robot-debug" >&2
+            echo "Usage: ./frieren.sh run playground|robot|robot-debug|sephirah" >&2
             return 1
             ;;
     esac
@@ -153,19 +195,34 @@ cmd_setup() {
     printf "==> Configure the Twitch token now? Opens a browser. [y/N] "
     local ans
     read -r ans || true
+    # Never let the token step abort setup: declining, closing the browser, or
+    # any failure inside cmd_token must still fall through to the next steps.
     case "${ans:-}" in
-        [Yy]*) cmd_token ;;
+        [Yy]*) cmd_token || echo "    token step skipped (incomplete) -- run './frieren.sh token' later." ;;
         *)     echo "    skipped -- run './frieren.sh token' later to set it up." ;;
+    esac
+
+    # Offer the prebuilt voice clips (no yt-dlp/ffmpeg needed). Failure here must
+    # not abort setup -- the user can still build from source afterwards.
+    echo
+    printf "==> Download prebuilt voice clips now? [Y/n] "
+    local vans
+    read -r vans || true
+    case "${vans:-}" in
+        [Nn]*) echo "    skipped -- fetch later with './frieren.sh voices --fetch', or build from source with './frieren.sh voices'." ;;
+        *)     _fetch_voices || echo "    voice fetch failed -- run './frieren.sh voices --fetch' later." ;;
     esac
 
     cat <<EOF
 
 Setup done. Next steps:
-  - Voice clips are gitignored; build them with (needs ffmpeg on PATH):
-      ./frieren.sh voices
+  - Voice clips: fetched above if you chose to; otherwise
+      ./frieren.sh voices --fetch   (prebuilt download, no ffmpeg)
+      ./frieren.sh voices           (rebuild from source; needs yt-dlp + ffmpeg)
   - Run the game:        ./frieren.sh run playground
-  - Run the robot face:  ./frieren.sh run robot
-  - Run the web panel:   ./frieren.sh run robot-debug
+  - Run the robot face:       ./frieren.sh run robot
+  - Run the Sephirah faces:   ./frieren.sh run sephirah
+  - Run the web panel:        ./frieren.sh run robot-debug
 EOF
 }
 
@@ -175,7 +232,14 @@ cmd_test() {
 }
 
 cmd_voices() {
-    # Build/rebuild the reference voice WAVs from the dub clips (yt-dlp + ffmpeg).
+    # `--fetch` pulls the prebuilt clips from the GitHub release (no yt-dlp /
+    # ffmpeg needed). Otherwise build/rebuild from the dub source via
+    # setup_voices.py, passing through any extra args (e.g. --only hod, --force).
+    if [ "${2:-}" = "--fetch" ]; then
+        echo "==> Fetching prebuilt reference voices..."
+        _fetch_voices
+        return
+    fi
     echo "==> Building reference voices..."
     uv run scripts/setup_voices.py "${@:2}"
 }
@@ -195,7 +259,9 @@ Commands:
   run playground            Run the full pygame playground
   run robot                 Run the robot face renderer + control-panel backend
   run robot-debug           Run the headless web control panel only
-  voices [args]             Build reference voice WAVs (passes args to setup_voices.py)
+  run sephirah              Run the Sephirah character renderer (named faces + mouth anim)
+  voices --fetch            Download prebuilt reference voice clips (no yt-dlp/ffmpeg)
+  voices [args]             Build reference voices from source (passes args to setup_voices.py)
   setup                     First-run setup (uv sync --group robot)
   token                     Open twitchtokengenerator + write tokens into .env
   test                      Run the test suite

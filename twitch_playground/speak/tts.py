@@ -24,10 +24,28 @@ import numpy as np
 
 # Default roster of characters with a cloned reference voice (see
 # scripts/setup_voices.py, which builds the reference WAV library).
-DEFAULT_ROSTER = ("hod", "malkuth", "netzach", "yesod")
+DEFAULT_ROSTER = ("angela", "hod", "malkuth", "netzach", "yesod")
 
-# Reference WAVs live alongside the package assets: assets/voices/<name>.wav.
+# Reference clips live alongside the package assets: assets/voices/<name>.<ext>.
 _DEFAULT_VOICES_DIR = Path(__file__).resolve().parent.parent / "assets" / "voices"
+
+# Accepted reference-clip container formats, in preference order. The reference
+# library is built as MP3 by setup_voices.py; WAV/FLAC are also accepted so
+# existing lossless clips keep working without a rebuild.
+_REFERENCE_EXTS = (".mp3", ".wav", ".flac", ".ogg")
+
+
+def _resolve_reference(voices_dir: Path, name: str) -> Path | None:
+    """Return the reference clip for *name* under *voices_dir*, or None.
+
+    Tries each extension in :data:`_REFERENCE_EXTS` order so a lossless clip
+    wins over a lossy one when both exist.
+    """
+    for ext in _REFERENCE_EXTS:
+        candidate = voices_dir / f"{name}{ext}"
+        if candidate.is_file():
+            return candidate
+    return None
 
 
 class SpeakEngineError(Exception):
@@ -43,7 +61,7 @@ class SpeakUnavailableError(SpeakEngineError):
 
 
 class MissingReferenceError(SpeakEngineError):
-    """A character's reference voice WAV is missing or unreadable."""
+    """A character's reference voice clip is missing or unreadable."""
 
 
 class SpeakEngine:
@@ -61,7 +79,8 @@ class SpeakEngine:
         self.voices_dir = Path(voices_dir) if voices_dir is not None else _DEFAULT_VOICES_DIR
         self.roster = tuple(roster)
 
-        self._is_speaking = False
+        self._is_speaking = False  # True across synth + playback (the whole speak())
+        self._is_playing = False   # True only while audio is actually on the mixer
         self._lock = threading.Lock()
         self._channel = None  # lazily reserved pygame mixer channel
         self._volume = 1.0  # playback gain in [0, 1]; applied to the channel
@@ -91,14 +110,17 @@ class SpeakEngine:
         # Pre-cache one reference tensor per character.
         self._references: dict[str, object] = {}
         for name in self.roster:
-            wav = self.voices_dir / f"{name}.wav"
-            if not wav.is_file():
-                raise MissingReferenceError(f"reference voice not found: {wav}")
+            ref = _resolve_reference(self.voices_dir, name)
+            if ref is None:
+                exts = "|".join(e.lstrip(".") for e in _REFERENCE_EXTS)
+                raise MissingReferenceError(
+                    f"reference voice not found: {self.voices_dir / name}.({exts})"
+                )
             try:
-                self._references[name] = self._core.load_reference(wav)
+                self._references[name] = self._core.load_reference(ref)
             except Exception as exc:
                 raise MissingReferenceError(
-                    f"failed to load reference voice {wav}: {exc}"
+                    f"failed to load reference voice {ref}: {exc}"
                 ) from exc
 
     @property
@@ -108,9 +130,24 @@ class SpeakEngine:
 
     @property
     def is_speaking(self) -> bool:
-        """True while a ``speak`` playback is in progress."""
+        """True for the whole ``speak`` call -- synthesis AND playback.
+
+        Note this is True during the (multi-second) synthesis phase before any
+        audio is audible. For "is sound actually coming out right now", use
+        :attr:`is_playing`.
+        """
         with self._lock:
             return self._is_speaking
+
+    @property
+    def is_playing(self) -> bool:
+        """True only while synthesized audio is actually playing on the mixer.
+
+        Unlike :attr:`is_speaking`, this stays False during synthesis and flips
+        True the moment the clip starts on the channel. Use it to drive visuals
+        that should track audible speech (e.g. a talking bob)."""
+        with self._lock:
+            return self._is_playing
 
     @property
     def volume(self) -> float:
@@ -179,6 +216,7 @@ class SpeakEngine:
             finally:
                 with self._lock:
                     self._is_speaking = False
+                    self._is_playing = False  # safety net if synth/playback raised
                 if on_done is not None:
                     on_done()
 
@@ -211,8 +249,14 @@ class SpeakEngine:
         with self._lock:
             self._channel.set_volume(self._volume)
         self._channel.play(sound)
-        while self._channel.get_busy():
-            pygame.time.wait(50)
+        with self._lock:
+            self._is_playing = True
+        try:
+            while self._channel.get_busy():
+                pygame.time.wait(50)
+        finally:
+            with self._lock:
+                self._is_playing = False
 
     # A short silence lead-in prepended to every clip before playback. The mixer
     # consistently swallows the first few ms of a clip -- SDL_mixer resamples our

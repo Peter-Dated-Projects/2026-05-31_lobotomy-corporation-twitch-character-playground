@@ -205,7 +205,7 @@ NAMEPLATE_OUTLINE = (0, 0, 0)
 # robot.server._pick_voice) so they always speak through the same character. Must
 # stay aligned with the reference WAVs under assets/voices/ and the robot art
 # under assets/robots/ (render/speech.ROSTER).
-ROBOT_ROSTER = ["hod", "malkuth", "netzach", "yesod"]
+ROBOT_ROSTER = ["angela", "hod", "malkuth", "netzach", "yesod"]
 
 # Reference-voice WAV directory handed to the engine. Mirrors the engine's own
 # default; kept here so the feature's config lives in one place.
@@ -230,6 +230,21 @@ ASSETS_ROOT = os.environ.get(
 )
 PARTS_DIR = os.path.join(ASSETS_ROOT, "Employee Parts")
 CLOTHES_DIR = os.path.join(ASSETS_ROOT, "Employee Clothes and Weapons")
+
+# Sephirah character sprites.
+SEPHIRAH_DIR = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "assets", "sprites", "Sephirah"
+)
+# Pre-made full portraits (256x256 RGBA, one per character) shown full-screen by
+# the sephirah renderer.
+SEPHIRAH_PORTRAITS_DIR = os.path.join(SEPHIRAH_DIR, "portraits")
+
+# --- Speaking "bob" animation -----------------------------------------------
+# While a character is speaking, the static portrait gently bobs to read as
+# "talking" without needing a mouth-open sprite.
+SPEAK_BOB_HZ = 2.6          # bob cycles per second
+SPEAK_BOB_AMPLITUDE = 0.009  # peak vertical offset as a fraction of stage height
+SPEAK_BOB_SCALE = 0.007      # peak extra scale (1.0 +/- this) for a subtle breathing pulse
 
 # Sprites within this vertical range are treated as one row when sorting
 # extracted blobs into reading order.

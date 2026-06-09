@@ -150,9 +150,16 @@ def draw_speech(
 
 
 # -- balloon construction --------------------------------------------------
-def _build_balloon(text: str, font: pygame.font.Font) -> pygame.Surface:
+def _build_balloon(
+    text: str,
+    font: pygame.font.Font,
+    text_color: tuple[int, int, int] = _TEXT_COLOR,
+) -> pygame.Surface:
     """Word-wrap ``text``, size a 9-sliced balloon to the wrapped block, and
-    render the text inside its inner padding."""
+    render the text inside its inner padding.
+
+    *text_color* defaults to the dark-on-light-balloon color; callers drawing
+    over a dark background (e.g. the Sephirah renderer) can pass white."""
     inset = _BALLOON_BORDER + _BALLOON_PAD
     max_inner_w = max(1, round(settings.SCREEN_W * _BALLOON_MAX_W_FRAC) - 2 * inset)
     lines = _wrap_text(text, font, max_inner_w)
@@ -163,7 +170,7 @@ def _build_balloon(text: str, font: pygame.font.Font) -> pygame.Surface:
 
     balloon = _scale_balloon(load_balloon(), inner_w + 2 * inset, inner_h + 2 * inset)
     for i, line in enumerate(lines):
-        label = font.render(line, True, _TEXT_COLOR)
+        label = font.render(line, True, text_color)
         balloon.blit(label, (inset, inset + i * (line_h + _LINE_SPACING)))
     return balloon
 

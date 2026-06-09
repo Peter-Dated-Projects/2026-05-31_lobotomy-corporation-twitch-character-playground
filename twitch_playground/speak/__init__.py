@@ -2,7 +2,7 @@
 
 Manual smoke test (slow: first run downloads the Kokoro + Kanade model weights
 from Hugging Face; CPU synthesis is roughly real-time, faster on CUDA). Not run
-in CI. Requires the reference voice WAVs under ``assets/voices/<name>.wav``::
+in CI. Requires the reference voice MP3s under ``assets/voices/<name>.mp3``::
 
     from twitch_playground.speak import SpeakEngine
     eng = SpeakEngine()                       # loads models once (~25-30s cold)

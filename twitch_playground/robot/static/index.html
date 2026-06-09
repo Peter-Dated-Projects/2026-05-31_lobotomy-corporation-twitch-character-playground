@@ -77,6 +77,19 @@
   </div>
 
   <div class="card">
+    <label>Color change event</label>
+    <div class="status" style="margin-bottom:10px">
+      on screen: <strong id="speaker" style="color:#e6e6e6">—</strong>
+    </div>
+    <div class="row">
+      <div style="flex:0 0 auto">
+        <button id="reroll">Change speaker (random)</button>
+      </div>
+    </div>
+    <div class="presets" id="speakerButtons"></div>
+  </div>
+
+  <div class="card">
     <label>Response log</label>
     <div id="log"></div>
   </div>
@@ -100,12 +113,35 @@ async function refreshHealth() {
     if (h.status === "unavailable" && h.detail) t += ` · ${h.detail}`;
     if (h.status === "loading") t += " (loading models, ~25-30s on first run)";
     $("statustext").textContent = t;
-    // populate voice dropdown once
+    $("speaker").textContent = h.speaker || "—";
+    // populate voice dropdown + per-character color-change buttons once
     const sel = $("voice");
     if (sel.options.length <= 1 && h.roster) {
       h.roster.forEach((r) => { const o = document.createElement("option"); o.value = r; o.textContent = r; sel.appendChild(o); });
     }
+    const sb = $("speakerButtons");
+    if (sb.childElementCount === 0 && h.roster) {
+      h.roster.forEach((r) => {
+        const b = document.createElement("button");
+        b.textContent = r;
+        b.addEventListener("click", () => changeSpeaker(r));
+        sb.appendChild(b);
+      });
+    }
   } catch (e) { $("statustext").textContent = "backend unreachable"; $("dot").className = "dot unavailable"; }
+}
+
+async function changeSpeaker(character) {
+  const body = character ? { character } : {};
+  log(`POST /api/change-speaker  ${JSON.stringify(body)}`, "muted");
+  try {
+    const r = await (await fetch("/api/change-speaker", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    })).json();
+    if (!r.ok) { log(`error: ${r.error || "change-speaker failed"}`, "err"); return; }
+    $("speaker").textContent = r.speaker || "—";
+    log(`color change → speaker is now ${r.speaker}`, "ok");
+  } catch (e) { log(`request failed: ${e}`, "err"); }
 }
 
 async function sendSpeak(text) {
@@ -121,6 +157,7 @@ async function sendSpeak(text) {
   } catch (e) { log(`request failed: ${e}`, "err"); }
 }
 
+$("reroll").addEventListener("click", () => changeSpeaker(null));
 $("say").addEventListener("click", () => sendSpeak($("text").value));
 $("text").addEventListener("keydown", (e) => { if (e.key === "Enter") sendSpeak($("text").value); });
 document.querySelectorAll(".presets button").forEach((b) =>

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the Sephirah reference-voice WAV library for the robot speak feature.
+"""Build the Sephirah reference-voice MP3 library for the robot speak feature.
 
 Downloads the English-dub character clips from the LoboCorpANV YouTube channel,
 concatenates them per character, then TRIMS a short clean segment to use as the
@@ -8,8 +8,8 @@ reference on every utterance, and a short clean clip (~15s of solo speech) is a
 better VC target than a long clip that still carries background score/SFX.
 
 Two files are written per character into twitch_playground/assets/voices/:
-  - <name>.wav       the trimmed reference the engine actually reads (~15s)
-  - <name>.full.wav  the full concatenated dub audio, kept for re-trimming
+  - <name>.mp3       the trimmed reference the engine actually reads (~15s)
+  - <name>.full.mp3  the full concatenated dub audio, kept for re-trimming
 
 Trim region: a character listed in TRIM_REGIONS uses a hand-picked (start, end)
 window verbatim -- preferred, since the heuristic below mis-picks on some clips.
@@ -29,7 +29,7 @@ video and are machine-local, not vendored art.
 Usage:
     uv run scripts/setup_voices.py                 # build every character
     uv run scripts/setup_voices.py --only hod      # just one
-    uv run scripts/setup_voices.py --force         # rebuild existing WAVs
+    uv run scripts/setup_voices.py --force         # rebuild existing MP3s
     uv run scripts/setup_voices.py --denoise        # run deepfilternet pass (optional)
     uv run scripts/setup_voices.py --list          # print the roster and exit
 
@@ -44,7 +44,6 @@ import shutil
 import subprocess
 import sys
 import tempfile
-import wave
 from pathlib import Path
 
 import numpy as np
@@ -56,8 +55,9 @@ VOICES_DIR = REPO_ROOT / "twitch_playground" / "assets" / "voices"
 YOUTUBE_WATCH = "https://www.youtube.com/watch?v={id}"
 
 # Target reference-clip audio format. 24kHz mono matches Kokoro's expected
-# sample rate; s16 keeps the files small and universally readable.
+# sample rate. VBR quality 2 (~190 kbps) is transparent and universally readable.
 SAMPLE_RATE = 24000
+MP3_QUALITY = "2"  # ffmpeg -q:a value; 0=best, 9=worst; 2 is ~190kbps VBR
 
 # Trim parameters for picking the short VC reference out of the full dub audio.
 TARGET_SECONDS = 15.0  # length of the trimmed reference clip
@@ -104,9 +104,9 @@ CHARACTERS: dict[str, list[str]] = {
 }
 
 # Hand-picked reference regions as (start_seconds, end_seconds) within each
-# <name>.full.wav, chosen by listening rather than trusting the energy heuristic.
+# <name>.full.mp3, chosen by listening rather than trusting the energy heuristic.
 # When a character appears here its region is used verbatim; otherwise the build
-# falls back to _pick_clean_window. Re-derive these by cutting from the .full.wav
+# falls back to _pick_clean_window. Re-derive these by cutting from the .full.mp3
 # (which setup_voices keeps) and listening, then update the tuple here.
 TRIM_REGIONS: dict[str, tuple[float, float]] = {
     "hod": (5.0, 35.0),
@@ -134,33 +134,33 @@ def _run(cmd: list[str]) -> None:
         _die(f"command failed ({proc.returncode}): {' '.join(cmd[:3])} ...")
 
 
-def _download_clip(video_id: str, dest_wav: Path) -> None:
-    """Download a single video's audio track as WAV."""
-    # yt-dlp writes <out>.wav; pass the stem and let it add the extension.
+def _download_clip(video_id: str, dest_mp3: Path) -> None:
+    """Download a single video's audio track as MP3."""
+    # yt-dlp writes <out>.mp3; pass the stem and let it add the extension.
     _run(
         [
             "yt-dlp",
             "-x",
             "--audio-format",
-            "wav",
+            "mp3",
             "--audio-quality",
-            "0",
+            MP3_QUALITY,
             "--no-playlist",
             "-o",
-            str(dest_wav.with_suffix("")) + ".%(ext)s",
+            str(dest_mp3.with_suffix("")) + ".%(ext)s",
             YOUTUBE_WATCH.format(id=video_id),
         ]
     )
-    if not dest_wav.exists():
-        _die(f"expected {dest_wav} after download but it is missing")
+    if not dest_mp3.exists():
+        _die(f"expected {dest_mp3} after download but it is missing")
 
 
-def _concat_and_normalize(clip_wavs: list[Path], out_wav: Path) -> None:
+def _concat_and_normalize(clip_mp3s: list[Path], out_mp3: Path) -> None:
     """Concatenate clips and resample to the target reference format."""
     with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as f:
-        for w in clip_wavs:
+        for m in clip_mp3s:
             # ffconcat needs single-quoted, escaped paths
-            f.write(f"file '{w.as_posix()}'\n")
+            f.write(f"file '{m.as_posix()}'\n")
         list_file = Path(f.name)
     try:
         _run(
@@ -177,35 +177,34 @@ def _concat_and_normalize(clip_wavs: list[Path], out_wav: Path) -> None:
                 str(SAMPLE_RATE),
                 "-ac",
                 "1",
-                "-sample_fmt",
-                "s16",
-                str(out_wav),
+                "-q:a",
+                MP3_QUALITY,
+                str(out_mp3),
             ]
         )
     finally:
         list_file.unlink(missing_ok=True)
 
 
-def _pick_clean_window(full_wav: Path) -> tuple[float, float]:
-    """Pick the cleanest sustained-speech window in `full_wav`.
+def _pick_clean_window(full_mp3: Path) -> tuple[float, float]:
+    """Pick the cleanest sustained-speech window in `full_mp3`.
 
     Returns (start_seconds, duration_seconds). See the module docstring for the
     heuristic. Deterministic: the same input always yields the same window.
-    Falls back to a fixed offset if the clip is too short or not 16-bit PCM.
+    Falls back to a fixed offset if the clip is too short.
     """
-    with wave.open(str(full_wav), "rb") as w:
-        rate = w.getframerate()
-        n_channels = w.getnchannels()
-        sampwidth = w.getsampwidth()
-        raw = w.readframes(w.getnframes())
-
-    if sampwidth != 2:
-        # _concat_and_normalize always writes s16, so this is defensive only.
+    proc = subprocess.run(
+        [
+            "ffmpeg", "-y", "-i", str(full_mp3),
+            "-f", "s16le", "-ar", str(SAMPLE_RATE), "-ac", "1", "pipe:1",
+        ],
+        capture_output=True,
+    )
+    if proc.returncode != 0:
         return (INTRO_SKIP_SECONDS, TARGET_SECONDS)
 
-    samples = np.frombuffer(raw, dtype=np.int16)
-    if n_channels > 1:
-        samples = samples[::n_channels]  # channel 0 only
+    rate = SAMPLE_RATE
+    samples = np.frombuffer(proc.stdout, dtype=np.int16)
     total_sec = len(samples) / rate
     if total_sec <= TARGET_SECONDS:
         return (0.0, total_sec)  # whole clip is shorter than the target window
@@ -235,8 +234,8 @@ def _pick_clean_window(full_wav: Path) -> tuple[float, float]:
     return (best * FRAME_SECONDS, TARGET_SECONDS)
 
 
-def _trim(full_wav: Path, out_wav: Path, start: float, dur: float) -> None:
-    """Cut [start, start+dur] from full_wav into out_wav at the reference format."""
+def _trim(full_mp3: Path, out_mp3: Path, start: float, dur: float) -> None:
+    """Cut [start, start+dur] from full_mp3 into out_mp3 at the reference format."""
     _run(
         [
             "ffmpeg",
@@ -246,14 +245,14 @@ def _trim(full_wav: Path, out_wav: Path, start: float, dur: float) -> None:
             "-t",
             f"{dur:.3f}",
             "-i",
-            str(full_wav),
+            str(full_mp3),
             "-ar",
             str(SAMPLE_RATE),
             "-ac",
             "1",
-            "-sample_fmt",
-            "s16",
-            str(out_wav),
+            "-q:a",
+            MP3_QUALITY,
+            str(out_mp3),
         ]
     )
 
@@ -273,45 +272,45 @@ def _denoise(wav: Path) -> None:
 
 
 def build_character(name: str, video_ids: list[str], *, force: bool, denoise: bool) -> None:
-    out_wav = VOICES_DIR / f"{name}.wav"  # short trimmed reference the engine reads
-    full_wav = VOICES_DIR / f"{name}.full.wav"  # full concat, kept for re-trimming
-    if out_wav.exists() and not force:
+    out_mp3 = VOICES_DIR / f"{name}.mp3"  # short trimmed reference the engine reads
+    full_mp3 = VOICES_DIR / f"{name}.full.mp3"  # full concat, kept for re-trimming
+    if out_mp3.exists() and not force:
         print(f"[{name}] exists, skipping (use --force to rebuild)")
         return
 
     print(f"[{name}] building from {len(video_ids)} clip(s)")
     with tempfile.TemporaryDirectory(prefix=f"voices_{name}_") as tmp:
         tmpdir = Path(tmp)
-        clip_wavs: list[Path] = []
+        clip_mp3s: list[Path] = []
         for i, vid in enumerate(video_ids):
-            clip = tmpdir / f"{name}_{i:02d}.wav"
+            clip = tmpdir / f"{name}_{i:02d}.mp3"
             print(f"  download {vid} -> {clip.name}")
             _download_clip(vid, clip)
-            clip_wavs.append(clip)
-        print(f"  concat + resample -> {full_wav.name}")
-        _concat_and_normalize(clip_wavs, full_wav)
+            clip_mp3s.append(clip)
+        print(f"  concat + resample -> {full_mp3.name}")
+        _concat_and_normalize(clip_mp3s, full_mp3)
 
     region = TRIM_REGIONS.get(name)
     if region is not None:
         start, end = region
         dur = end - start
-        print(f"  trim hand-picked region {start:.0f}-{end:.0f}s -> {out_wav.name}")
+        print(f"  trim hand-picked region {start:.0f}-{end:.0f}s -> {out_mp3.name}")
     else:
-        start, dur = _pick_clean_window(full_wav)
-        print(f"  trim cleanest {dur:.0f}s window @ {start:.1f}s -> {out_wav.name}")
-    _trim(full_wav, out_wav, start, dur)
+        start, dur = _pick_clean_window(full_mp3)
+        print(f"  trim cleanest {dur:.0f}s window @ {start:.1f}s -> {out_mp3.name}")
+    _trim(full_mp3, out_mp3, start, dur)
 
     if denoise:
         # Denoise the SHORT reference, not the 8-11min full clip.
-        print(f"  denoise {out_wav.name}")
-        _denoise(out_wav)
-    print(f"[{name}] done -> {out_wav} (full clip kept at {full_wav.name})")
+        print(f"  denoise {out_mp3.name}")
+        _denoise(out_mp3)
+    print(f"[{name}] done -> {out_mp3} (full clip kept at {full_mp3.name})")
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--only", metavar="NAME", help="build only this character")
-    parser.add_argument("--force", action="store_true", help="rebuild WAVs that already exist")
+    parser.add_argument("--force", action="store_true", help="rebuild MP3s that already exist")
     parser.add_argument("--denoise", action="store_true", help="run deepfilternet pass (needs deepfilternet)")
     parser.add_argument("--list", action="store_true", help="print the roster and exit")
     args = parser.parse_args()

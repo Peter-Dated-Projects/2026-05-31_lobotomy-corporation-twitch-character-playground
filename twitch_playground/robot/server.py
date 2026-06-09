@@ -56,6 +56,11 @@ class _EngineState:
         eng = self.engine
         return bool(eng and eng.is_speaking)
 
+    def is_playing(self) -> bool:
+        """True only while audio is actually playing (not during synthesis)."""
+        eng = self.engine
+        return bool(eng and eng.is_playing)
+
 
 STATE = _EngineState()
 
@@ -159,20 +164,23 @@ def _start_redemptions() -> None:
 @app.on_event("startup")
 def _startup() -> None:
     threading.Thread(target=_load_engine, name="engine-load", daemon=True).start()
+    # Seed an on-screen character immediately so the renderer always has someone
+    # to draw -- the face must never be blank, and it only changes on a
+    # color-change event (the Change Speaker reward or the dev-UI button).
+    if current_face() is None:
+        _reroll_speaker()
     _start_redemptions()
 
 
-# --- voice selection ----------------------------------------------------------
-# `_CURRENT_SPEAKER` is the voice last chosen, and the robot the renderer keeps on
-# screen after speaking. Two modes, by whether a "Change Speaker" reward id is set:
-#   - OFF (no TWITCH_REWARD_ID_COLOR_CHANGE): each utterance picks a NEW random
-#     voice, which becomes the on-screen face and stays until the next utterance.
-#   - ON: the speaker is LOCKED -- the first utterance seeds it at random, every
-#     later utterance reuses it, and a Change Speaker redemption re-rolls it to a
-#     different voice. The face persists between utterances either way.
+# --- speaker selection --------------------------------------------------------
+# `_CURRENT_SPEAKER` is the single on-screen character AND the default TTS voice.
+# It is persistent: seeded once at startup so a face always shows, reused for
+# every utterance, and changed ONLY by a color-change event -- either the Twitch
+# "Change Speaker" reward (TWITCH_REWARD_ID_COLOR_CHANGE) or the dev-UI button
+# (POST /api/change-speaker). Speaking never changes who is on screen.
 _SPEAKER_LOCK = threading.Lock()
 _COLOR_CHANGE_REWARD_ID: str | None = None  # set at startup from the env
-_CURRENT_SPEAKER: str | None = None           # voice last chosen == on-screen face
+_CURRENT_SPEAKER: str | None = None           # the on-screen character == default voice
 
 
 def _random_voice() -> str:
@@ -180,20 +188,22 @@ def _random_voice() -> str:
 
 
 def _choose_voice() -> str:
-    """The voice for a TTS utterance, per the modes above. Always records the
-    chosen voice as `_CURRENT_SPEAKER` so the robot stays on screen after speaking;
-    in locked mode the speaker is seeded once and reused."""
+    """The voice for a TTS utterance: always the persistent current speaker.
+
+    Seeds it once if somehow still unset (startup normally seeds it). Speaking
+    does NOT re-roll the speaker -- the on-screen character only changes on a
+    color-change event (see :func:`change_speaker`)."""
     global _CURRENT_SPEAKER
     with _SPEAKER_LOCK:
-        if _COLOR_CHANGE_REWARD_ID is None or _CURRENT_SPEAKER is None:
+        if _CURRENT_SPEAKER is None:
             _CURRENT_SPEAKER = _random_voice()
         return _CURRENT_SPEAKER
 
 
 def _reroll_speaker() -> str:
-    """Lock in a NEW random current speaker (different from the current one when
-    possible) and return it. Triggered by a Change Speaker reward redemption,
-    and once at startup to seed the persistent face."""
+    """Pick a NEW current speaker (different from the current one when possible)
+    and return it. This is the color-change event: triggered by the Change
+    Speaker reward, the dev-UI button, and once at startup to seed the face."""
     global _CURRENT_SPEAKER
     with _SPEAKER_LOCK:
         others = [v for v in settings.ROBOT_ROSTER if v != _CURRENT_SPEAKER]
@@ -201,10 +211,23 @@ def _reroll_speaker() -> str:
         return _CURRENT_SPEAKER
 
 
+def change_speaker(character: str | None = None) -> str:
+    """Color-change event: switch the on-screen character.
+
+    With *character* given (and valid), switch to it exactly; otherwise re-roll
+    to a random different one. Returns the new current speaker."""
+    global _CURRENT_SPEAKER
+    if character is not None and character in settings.ROBOT_ROSTER:
+        with _SPEAKER_LOCK:
+            _CURRENT_SPEAKER = character
+            return _CURRENT_SPEAKER
+    return _reroll_speaker()
+
+
 def current_face() -> str | None:
-    """The robot the renderer keeps on screen between utterances: the voice last
-    chosen (or the locked speaker in Change Speaker mode). None only before the
-    first utterance in random mode."""
+    """The character the renderer keeps on screen. Seeded at startup and changed
+    only by a color-change event, so it is non-None for the renderer's whole
+    lifetime and never flips on its own between utterances."""
     return _CURRENT_SPEAKER
 
 
@@ -225,13 +248,27 @@ def health() -> dict:
         "device": STATE.device,
         "roster": settings.ROBOT_ROSTER,
         "is_speaking": STATE.is_speaking(),
-        "speaker": current_face(),  # locked current speaker, or null in random mode
+        "is_playing": STATE.is_playing(),  # audio actually audible right now
+        "speaker": current_face(),         # persistent on-screen character
     }
 
 
 @app.get("/api/roster")
 def roster() -> dict:
     return {"roster": settings.ROBOT_ROSTER}
+
+
+class ChangeSpeakerRequest(BaseModel):
+    character: str | None = None  # switch to this exact character; omit to re-roll
+
+
+@app.post("/api/change-speaker")
+def change_speaker_endpoint(req: ChangeSpeakerRequest | None = None) -> dict:
+    """Color-change event: switch the on-screen character. The dev-UI emitter and
+    the Twitch Change Speaker reward both land here (the reward via its listener)."""
+    requested = req.character if req is not None else None
+    speaker = change_speaker(requested)
+    return {"ok": True, "speaker": speaker}
 
 
 def speak_text(text: str, *, character: str | None = None, author: str = "webui") -> dict:

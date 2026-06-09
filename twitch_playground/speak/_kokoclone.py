@@ -303,6 +303,38 @@ def _patch_kokoro_compat(kokoro: Any) -> Any:
     return kokoro
 
 
+def _patch_fsq_mps_compat() -> None:
+    """Make Kanade's FSQ index reduction run on Apple's MPS backend.
+
+    ``FSQ.codes_to_indices`` (kanade_tokenizer/module/fsq.py) computes codebook
+    indices via a float64 basis product. MPS has no float64 dtype, so the op
+    raises on Apple Silicon. We relocate ONLY that reduction to CPU -- the
+    float64 math is preserved verbatim, so the resulting indices are
+    bit-identical to upstream -- and move the long result back to the original
+    device. The heavy Kanade model stays on MPS; only this tiny integer
+    reduction hops to CPU. Idempotent: safe to call on every load.
+    """
+    import torch
+    from kanade_tokenizer.module import fsq
+
+    if getattr(fsq.FSQ, "_mps_float64_patched", False):
+        return
+
+    _orig = fsq.FSQ.codes_to_indices
+
+    def codes_to_indices(self, zhat):  # mirrors upstream, CPU float64 on MPS
+        if zhat.device.type != "mps":
+            return _orig(self, zhat)
+        out_device = zhat.device
+        half_width = (self._levels // 2).to("cpu")
+        scaled = (zhat.to("cpu") * half_width) + half_width
+        indices = (scaled * self._basis.to("cpu").to(torch.float64)).to(torch.long).sum(dim=-1)
+        return indices.to(out_device)
+
+    fsq.FSQ.codes_to_indices = codes_to_indices
+    fsq.FSQ._mps_float64_patched = True
+
+
 class KokoCloneCore:
     """English-only KokoClone engine: Kokoro synth + Kanade voice conversion.
 
@@ -325,6 +357,10 @@ class KokoCloneCore:
         Split out from :meth:`load` so the MPS-failure path can retry it on CPU.
         """
         from kanade_tokenizer import KanadeModel, load_vocoder
+
+        # MPS lacks float64; relocate FSQ's index reduction to CPU so the model
+        # can run on Apple Silicon. No-op on CUDA/CPU. Idempotent.
+        _patch_fsq_mps_compat()
 
         self.kanade = KanadeModel.from_pretrained(kanade_model).to(self.device).eval()
         self.vocoder = load_vocoder(self.kanade.config.vocoder_name).to(self.device)
